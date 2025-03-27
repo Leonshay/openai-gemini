@@ -248,6 +248,7 @@ ${originalSystemPrompt}
         model,
         id,
       );
+      console.log(body);
       if (body.choices && body.choices.length > 0 && body.choices[0].message && body.choices[0].message.length > 0) {
         console.log(thinkingContent);
         console.log(body.choices[0].message[0].reasoning_content );
