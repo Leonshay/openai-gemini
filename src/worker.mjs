@@ -194,6 +194,7 @@ ${originalSystemPrompt}
     headers: makeHeaders(apiKey, {"Content-Type": "application/json"}),
     body: JSON.stringify(await transformRequest(thinkingReq))
   });
+  console.log(thinkingResponse)
 
   // 解析思考结果
   let thinkingContent;
@@ -203,7 +204,7 @@ ${originalSystemPrompt}
     thinkingContent =
       JSON.parse(JSON.stringify({
         choices: JSON.parse(thinkingBody).candidates.map(transformCandidatesMessage),
-      })).choices[0]?.messages?.content;
+      })).choices[0]?.message?.content;
   } else thinkingContent = "无"
 
   console.log(thinkingContent);
