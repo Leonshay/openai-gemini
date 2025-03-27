@@ -249,7 +249,16 @@ ${originalSystemPrompt}
         model,
         id,
       );
+      // 解析处理后的 JSON 对象
+      let parsedBody = JSON.parse(body);
 
+      // 在每个 message 中添加 reasoning_content 字段
+      parsedBody.choices.forEach(choice => {
+        choice.message.reasoning_content = thinkingContent;
+      });
+      console.log(parsedBody)
+      // 将修改后的对象重新转换为 JSON 字符串
+      body = JSON.stringify(parsedBody);
     }
   }
   return new Response(body, fixCors(response));
@@ -423,7 +432,6 @@ const transformCandidates = (key, cand) => ({
   [key]: {
     role: "assistant",
     content: cand.content?.parts.map(p => p.text).join(SEP),
-    reasoning_content: thinkingContent
   },
   logprobs: null,
   finish_reason: reasonsMap[cand.finishReason] || cand.finishReason,
