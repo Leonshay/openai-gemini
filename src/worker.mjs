@@ -171,7 +171,7 @@ async function handleCompletions(req, apiKey) {
       {
         role: "system",
         content: `
-思考协议：
+# 思考协议：
 请你仔细思考并分析问题，按照以下步骤进行，当用户有输出格式要求时（如精简，排版，字数等），不用在思考中执行，继续按照流程思考，因为本轮输出的内容仅有思考，输出格式要求仅生效于最终回复，但要在思考中考虑到格式要求，以便在最终回复中执行：
 1. 理解问题的核心和关键点
 2. 分析可能的解决方案
@@ -179,7 +179,7 @@ async function handleCompletions(req, apiKey) {
 4. 选择最佳方案并说明原因
 5. 给出具体的执行步骤
 
-original system prompt:
+# original system prompt:
 ${originalSystemPrompt}
 `
       },
@@ -203,7 +203,7 @@ ${originalSystemPrompt}
     messages: [
       {
         role: "system",
-        content: `${originalSystemPrompt}\n\n### 模型思考过程：\n${thinkingContent}\n---\n请根据模型思考撰写最终回复。`
+        content: `# original system prompt:${originalSystemPrompt}\n\n# 模型思考过程：\n${thinkingContent}\n\n---\n\n请根据模型思考撰写最终回复。`
       },
       ...originalReq.messages.filter(m => m.role !== "system")
     ]
