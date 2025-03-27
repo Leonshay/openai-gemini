@@ -201,7 +201,7 @@ ${originalSystemPrompt}
     thinkingBody = await thinkingResponse.text();
     thinkingContent =
       JSON.stringify({
-        choices: thinkingBody.candidates.map(transformCandidatesMessage),
+        choices: JSON.parse(thinkingBody).candidates.map(transformCandidatesMessage),
       });
   } else thinkingContent = "无"
 
