@@ -142,19 +142,13 @@ async function handleCompletions (req, apiKey) {
   // 第一次请求获取思考过程
   const thinkingReq = {
     ...req,
-    messages: [
-      ...(req.messages || []),
-      {
-        role: "system",
-        content: THINKING_PROTOCOL
-      }
-    ]
+    messages: req.messages || []
   };
   
   const thinkingResponse = await fetch(`${BASE_URL}/${API_VERSION}/models/${DEFAULT_MODEL}:generateContent`, {
     method: "POST",
     headers: makeHeaders(apiKey, { "Content-Type": "application/json" }),
-    body: JSON.stringify(await transformRequest(thinkingReq))
+    body: JSON.stringify(await transformRequest(thinkingReq, null, true))
   });
 
   let reasoning_content;
@@ -335,18 +329,22 @@ const transformMsg = async ({ role, content, reasoning_content }) => {
   return { role, parts };
 };
 
-const transformMessages = async (messages, reasoning_content) => {
+const transformMessages = async (messages, reasoning_content, isThinkingRequest = false) => {
   if (!messages) { return; }
   const contents = [];
-  if (reasoning_content) {
-    contents.push({
-      role: "system",
-      parts: [{ text: `以下是思考过程：\n${reasoning_content}` }]
-    });
-  }
   let system_instruction;
+  let originalSystemPrompt;
+
   for (const item of messages) {
     if (item.role === "system") {
+      originalSystemPrompt = item.content;
+      if (isThinkingRequest) {
+        // 第一次请求：将思考协议添加到原system prompt前面
+        item.content = `${THINKING_PROTOCOL}\n\n${item.content}`;
+      } else if (reasoning_content) {
+        // 第二次请求：将思考结果添加到原system prompt末尾
+        item.content = `${item.content}\n\n思考过程：\n${reasoning_content}`;
+      }
       delete item.role;
       system_instruction = await transformMsg(item);
     } else {
@@ -354,10 +352,17 @@ const transformMessages = async (messages, reasoning_content) => {
       contents.push(await transformMsg(item));
     }
   }
+
+  // 如果没有system prompt，但有思考结果
+  if (!system_instruction && reasoning_content && !isThinkingRequest) {
+    system_instruction = await transformMsg({
+      content: `思考过程：\n${reasoning_content}`
+    });
+  }
+
   if (system_instruction && contents.length === 0) {
     contents.push({ role: "model", parts: { text: " " } });
   }
-  //console.info(JSON.stringify(contents, 2));
   return { system_instruction, contents };
 };
 
