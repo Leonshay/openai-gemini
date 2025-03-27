@@ -494,12 +494,12 @@ ${originalSystemPrompt}
     messages: [
       {
         role: "system",
-        content: `# 思考过程：\n${thinkingContent}\n\n# original system prompt:${originalSystemPrompt}\n\n---\n\n请根据用户输入，参考思考过程，并绝对优先遵守original system prompt的指令（如角色设定/工作流/输出格式要求等），结合这三者组织撰写最终回复。`
+        content: `# 思考过程：\n${thinkingContent}\n\n# original system prompt:${originalSystemPrompt}\n\n---\n\n请根据用户输入，参考思考过程，并确保绝对优先遵守original system prompt的指令（角色设定/工作流/输出格式要求等，如要求极其精炼则进行总结控制字数），结合这三者组织撰写最终回复。`
       },
       ...originalReq.messages.filter(m => m.role !== "system")
     ]
   };
-
+  console.log(finalReq.messages[0].content)
   const response = await fetch(url, {
     method: "POST",
     headers: makeHeaders(apiKey, {"Content-Type": "application/json"}),
