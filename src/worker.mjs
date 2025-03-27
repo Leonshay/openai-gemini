@@ -206,6 +206,8 @@ ${originalSystemPrompt}
       })).choices[0]?.messages?.content;
   } else thinkingContent = "无"
 
+  console.log(thinkingContent);
+
   // 第二步：发送最终请求
   const finalReq = {
     ...originalReq,
