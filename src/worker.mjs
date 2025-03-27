@@ -249,8 +249,11 @@ ${originalSystemPrompt}
         id,
       );
       if (body.choices && body.choices.length > 0 && body.choices[0].message && body.choices[0].message.length > 0) {
+        console.log(thinkingContent);
+        console.log(body.choices[0].message[0].reasoning_content );
         body.choices[0].message[0].reasoning_content = thinkingContent;
-      }
+        console.log(body.choices[0].message[0].reasoning_content );
+      }else console.log("aaa")
     }
   }
   return new Response(body, fixCors(response));
