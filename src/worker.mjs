@@ -393,12 +393,12 @@ const transformCandidates = (key, cand, reasoning_content) => ({
   [key]: {
     role: "assistant",
     content: cand.content?.parts.map(p => p.text).join(SEP),
-    reasoning_content: reasoning_content || null },
+    reasoning_content: reasoning_content },
   logprobs: null,
   finish_reason: reasonsMap[cand.finishReason] || cand.finishReason,
 });
-const transformCandidatesMessage = transformCandidates.bind(null, "message");
-const transformCandidatesDelta = transformCandidates.bind(null, "delta");
+const transformCandidatesMessage = (cand, reasoning_content) => transformCandidates("message", cand, reasoning_content);
+const transformCandidatesDelta = (cand, reasoning_content) => transformCandidates("delta", cand, reasoning_content);
 
 const transformUsage = (data) => ({
   completion_tokens: data.candidatesTokenCount,
