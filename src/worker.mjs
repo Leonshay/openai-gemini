@@ -194,8 +194,10 @@ ${originalSystemPrompt}
   });
 
   // 解析思考结果
-  const thinkingResult = await thinkingResponse.json();
-  const thinkingContent = thinkingResult.candidates?.[0]?.content?.parts?.[0]?.text || "";
+
+  let thinkingBody = thinkingResponse.body;
+  thinkingBody = await thinkingResponse.text();
+  const thinkingContent = JSON.stringify(JSON.parse(thinkingBody).data.candidates.map(transformCandidatesMessage));
 
   // 第二步：发送最终请求
   const finalReq = {
@@ -400,7 +402,7 @@ const generateChatcmplId = () => {
 };
 
 const reasonsMap = { //https://ai.google.dev/api/rest/v1/GenerateContentResponse#finishreason
-                     //"FINISH_REASON_UNSPECIFIED": // Default value. This value is unused.
+  //"FINISH_REASON_UNSPECIFIED": // Default value. This value is unused.
   "STOP": "stop",
   "MAX_TOKENS": "length",
   "SAFETY": "content_filter",
@@ -437,7 +439,7 @@ const processCompletionsResponse = (data, model, id, reasoningContent) => {
     object: "chat.completion",
     usage: transformUsage(data.usageMetadata),
     // 新增推理内容字段
-    ...(reasoningContent && { reasoning_content: reasoningContent })
+    ...(reasoningContent && {reasoning_content: reasoningContent})
   });
 };
 
