@@ -140,7 +140,7 @@ async function handleEmbeddings(req, apiKey) {
 
 const DEFAULT_MODEL = "gemini-1.5-pro-latest";
 
-let thinkingContent;
+
 
 async function handleCompletions(req, apiKey) {
   let model = DEFAULT_MODEL;
@@ -196,7 +196,7 @@ ${originalSystemPrompt}
   });
 
   // 解析思考结果
-
+  let thinkingContent;
   let thinkingBody = thinkingResponse.body;
   if (thinkingResponse.ok) {
     thinkingBody = await thinkingResponse.text();
