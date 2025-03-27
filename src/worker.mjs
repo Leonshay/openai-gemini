@@ -531,16 +531,16 @@ ${originalSystemPrompt}
         model,
         id,
       );
-      // 解析处理后的 JSON 对象
-      let parsedBody = JSON.parse(body);
-
-      // 在每个 message 中添加 reasoning_content 字段
-      parsedBody.choices.forEach(choice => {
-        choice.message.reasoning_content = thinkingContent;
-      });
-      // 将修改后的对象重新转换为 JSON 字符串
-      body = JSON.stringify(parsedBody);
     }
+    // 解析处理后的 JSON 对象
+    let parsedBody = JSON.parse(body);
+
+    // 在每个 message 中添加 reasoning_content 字段
+    parsedBody.choices.forEach(choice => {
+      choice.message.reasoning_content = thinkingContent;
+    });
+    // 将修改后的对象重新转换为 JSON 字符串
+    body = JSON.stringify(parsedBody);
   }
   return new Response(body, fixCors(response));
 }
