@@ -196,7 +196,7 @@ async function handleCompletions (req, apiKey) {
         .pipeThrough(new TextEncoderStream());
     } else {
       body = await response.text();
-      body = processCompletionsResponse(JSON.parse(body), model, id);
+      body = processCompletionsResponse(JSON.parse(body), model, id, reasoning_content);
     }
   }
   return new Response(body, fixCors(response));
