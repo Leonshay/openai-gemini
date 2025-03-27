@@ -196,8 +196,14 @@ ${originalSystemPrompt}
   // 解析思考结果
 
   let thinkingBody = thinkingResponse.body;
-  thinkingBody = await thinkingResponse.text();
-  const thinkingContent = JSON.stringify(JSON.parse(thinkingBody).data.candidates.map(transformCandidatesMessage));
+  let thinkingContent;
+  if (thinkingResponse.ok) {
+    thinkingBody = await thinkingResponse.text();
+    thinkingContent =
+      JSON.stringify({
+        choices: thinkingBody.candidates.map(transformCandidatesMessage),
+      });
+  } else thinkingContent = "无"
 
   // 第二步：发送最终请求
   const finalReq = {
