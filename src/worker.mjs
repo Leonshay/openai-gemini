@@ -247,7 +247,7 @@ ${originalSystemPrompt}
         JSON.parse(body),
         model,
         id,
-        originalReq.stream === false ? thinkingContent : null // 仅非流式时包含
+        thinkingContent
       );
     }
   }
@@ -408,7 +408,7 @@ const generateChatcmplId = () => {
 };
 
 const reasonsMap = { //https://ai.google.dev/api/rest/v1/GenerateContentResponse#finishreason
-  //"FINISH_REASON_UNSPECIFIED": // Default value. This value is unused.
+                     //"FINISH_REASON_UNSPECIFIED": // Default value. This value is unused.
   "STOP": "stop",
   "MAX_TOKENS": "length",
   "SAFETY": "content_filter",
