@@ -139,6 +139,29 @@ async function handleEmbeddings (req, apiKey) {
 
 const DEFAULT_MODEL = "gemini-1.5-pro-latest";
 async function handleCompletions (req, apiKey) {
+  // 第一次请求获取思考过程
+  const thinkingReq = {
+    ...req,
+    messages: [
+      ...(req.messages || []),
+      {
+        role: "system",
+        content: THINKING_PROTOCOL
+      }
+    ]
+  };
+  
+  const thinkingResponse = await fetch(`${BASE_URL}/${API_VERSION}/models/${DEFAULT_MODEL}:generateContent`, {
+    method: "POST",
+    headers: makeHeaders(apiKey, { "Content-Type": "application/json" }),
+    body: JSON.stringify(await transformRequest(thinkingReq))
+  });
+
+  let reasoning_content;
+  if (thinkingResponse.ok) {
+    const data = JSON.parse(await thinkingResponse.text());
+    reasoning_content = data.candidates[0].content.parts[0].text;
+  }
   let model = DEFAULT_MODEL;
   switch(true) {
     case typeof req.model !== "string":
@@ -156,7 +179,7 @@ async function handleCompletions (req, apiKey) {
   const response = await fetch(url, {
     method: "POST",
     headers: makeHeaders(apiKey, { "Content-Type": "application/json" }),
-    body: JSON.stringify(await transformRequest(req)), // try
+    body: JSON.stringify(await transformRequest(req, reasoning_content)), // 传入思考过程
   });
 
   let body = response.body;
@@ -266,7 +289,15 @@ const parseImg = async (url) => {
   };
 };
 
-const transformMsg = async ({ role, content }) => {
+// 思考协议模板，使用多行字符串支持换行
+const THINKING_PROTOCOL = `思考协议：
+1. 仔细分析用户的问题和需求
+2. 列出可能的解决方案
+3. 评估每个方案的优缺点
+4. 选择最佳方案并说明原因
+5. 给出具体的实施步骤`;
+
+const transformMsg = async ({ role, content, reasoning_content }) => {
   const parts = [];
   if (!Array.isArray(content)) {
     // system, user: string
@@ -304,9 +335,15 @@ const transformMsg = async ({ role, content }) => {
   return { role, parts };
 };
 
-const transformMessages = async (messages) => {
+const transformMessages = async (messages, reasoning_content) => {
   if (!messages) { return; }
   const contents = [];
+  if (reasoning_content) {
+    contents.push({
+      role: "system",
+      parts: [{ text: `以下是思考过程：\n${reasoning_content}` }]
+    });
+  }
   let system_instruction;
   for (const item of messages) {
     if (item.role === "system") {
@@ -324,8 +361,8 @@ const transformMessages = async (messages) => {
   return { system_instruction, contents };
 };
 
-const transformRequest = async (req) => ({
-  ...await transformMessages(req.messages),
+const transformRequest = async (req, reasoning_content) => ({
+  ...await transformMessages(req.messages, reasoning_content),
   safetySettings,
   generationConfig: transformConfig(req),
 });
@@ -346,11 +383,12 @@ const reasonsMap = { //https://ai.google.dev/api/rest/v1/GenerateContentResponse
   // :"function_call",
 };
 const SEP = "\n\n|>";
-const transformCandidates = (key, cand) => ({
+const transformCandidates = (key, cand, reasoning_content) => ({
   index: cand.index || 0, // 0-index is absent in new -002 models response
   [key]: {
     role: "assistant",
-    content: cand.content?.parts.map(p => p.text).join(SEP) },
+    content: cand.content?.parts.map(p => p.text).join(SEP),
+    reasoning_content: reasoning_content },
   logprobs: null,
   finish_reason: reasonsMap[cand.finishReason] || cand.finishReason,
 });
@@ -413,7 +451,25 @@ function transformResponseStream (data, stop, first) {
 }
 const delimiter = "\n\n";
 async function toOpenAiStream (chunk, controller) {
-  const transform = transformResponseStream.bind(this);
+  // 获取思考过程
+  const reasoning_content = this.reasoning_content;
+  // 将思考过程添加到system prompt
+  if (reasoning_content) {
+    const system_prompt = {
+      role: "system",
+      content: `思考过程：\n${reasoning_content}`
+    };
+    // 添加到messages中
+    if (!this.messages) {
+      this.messages = [system_prompt];
+    } else {
+      this.messages.unshift(system_prompt);
+    }
+  }
+  const transform = transformResponseStream.bind({
+    ...this,
+    reasoning_content
+  });
   const line = await chunk;
   if (!line) { return; }
   let data;
@@ -442,7 +498,10 @@ async function toOpenAiStream (chunk, controller) {
   }
 }
 async function toOpenAiStreamFlush (controller) {
-  const transform = transformResponseStream.bind(this);
+  const transform = transformResponseStream.bind({
+    ...this,
+    reasoning_content
+  });
   if (this.last.length > 0) {
     for (const data of this.last) {
       controller.enqueue(transform(data, "stop"));
