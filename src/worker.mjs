@@ -494,7 +494,7 @@ ${originalSystemPrompt}
     messages: [
       {
         role: "system",
-        content: `# original system prompt:${originalSystemPrompt}\n\n# 思考过程：\n${thinkingContent}\n\n---\n\n请根据用户输入结合思考过程组织撰写最终回复。`
+        content: `# 思考过程：\n${thinkingContent}\n\n# original system prompt:${originalSystemPrompt}\n\n---\n\n请绝对优先遵守original system prompt，再根据用户输入，参考思考过程，结合这三者组织撰写最终回复。`
       },
       ...originalReq.messages.filter(m => m.role !== "system")
     ]
