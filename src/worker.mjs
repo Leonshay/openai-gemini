@@ -200,11 +200,10 @@ ${originalSystemPrompt}
   if (thinkingResponse.ok) {
     thinkingBody = await thinkingResponse.text();
     thinkingContent =
-      JSON.parse(JSON.stringify({
+      JSON.stringify({
         choices: JSON.parse(thinkingBody).candidates.map(transformCandidatesMessage),
-      })).choices[0]?.messages?.content;
+      });
   } else thinkingContent = "无"
-
 
   // 第二步：发送最终请求
   const finalReq = {
@@ -437,25 +436,18 @@ const transformUsage = (data) => ({
 });
 
 const processCompletionsResponse = (data, model, id, reasoningContent) => {
-  const choices = data.candidates.map((candidate, index) => {
-    const choice = transformCandidatesMessage(candidate);
-    if (index === 0) {
-      choice.message.reasoning_content = reasoningContent; // 新增嵌套字段
-    }
-    return choice;
-  });
-
   return JSON.stringify({
     id,
-    choices,
+    choices: data.candidates.map(transformCandidatesMessage),
     created: Math.floor(Date.now() / 1000),
     model,
+    //system_fingerprint: "fp_69829325d0",
     object: "chat.completion",
     usage: transformUsage(data.usageMetadata),
-    // 移除顶层的 reasoning_content 字段
+    // 新增推理内容字段
+    reasoning_content: reasoningContent
   });
 };
-
 
 const responseLineRE = /^data: (.*)(?:\n\n|\r\r|\r\n\r\n)/;
 
