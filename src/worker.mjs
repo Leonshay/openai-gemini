@@ -200,9 +200,9 @@ ${originalSystemPrompt}
   if (thinkingResponse.ok) {
     thinkingBody = await thinkingResponse.text();
     thinkingContent =
-      JSON.stringify({
+      JSON.parse(JSON.stringify({
         choices: JSON.parse(thinkingBody).candidates.map(transformCandidatesMessage),
-      });
+      })).choices[0]?.messages?.content;
   } else thinkingContent = "无"
 
   // 第二步：发送最终请求
@@ -247,8 +247,10 @@ ${originalSystemPrompt}
         JSON.parse(body),
         model,
         id,
-        thinkingContent
       );
+      if (body.choices && body.choices.length > 0 && body.choices[0].message && body.choices[0].message.length > 0) {
+        body.choices[0].message[0].reasoning_content = thinkingContent;
+      }
     }
   }
   return new Response(body, fixCors(response));
@@ -408,7 +410,7 @@ const generateChatcmplId = () => {
 };
 
 const reasonsMap = { //https://ai.google.dev/api/rest/v1/GenerateContentResponse#finishreason
-                     //"FINISH_REASON_UNSPECIFIED": // Default value. This value is unused.
+  //"FINISH_REASON_UNSPECIFIED": // Default value. This value is unused.
   "STOP": "stop",
   "MAX_TOKENS": "length",
   "SAFETY": "content_filter",
@@ -435,7 +437,7 @@ const transformUsage = (data) => ({
   total_tokens: data.totalTokenCount
 });
 
-const processCompletionsResponse = (data, model, id, reasoningContent) => {
+const processCompletionsResponse = (data, model, id) => {
   return JSON.stringify({
     id,
     choices: data.candidates.map(transformCandidatesMessage),
@@ -444,8 +446,6 @@ const processCompletionsResponse = (data, model, id, reasoningContent) => {
     //system_fingerprint: "fp_69829325d0",
     object: "chat.completion",
     usage: transformUsage(data.usageMetadata),
-    // 新增推理内容字段
-    reasoning_content: reasoningContent
   });
 };
 
