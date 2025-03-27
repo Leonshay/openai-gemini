@@ -165,6 +165,7 @@ async function handleCompletions (req, apiKey) {
   // 第一步：处理思考协议
   const messages = req.messages || [];
   let systemPrompt = messages.find(msg => msg.role === "system");
+  let originSystemPrompt = systemPrompt?.content;
   let thinkingProtocol = req.thinking_protocol || THINKING_PROTOCOL;
 
   // 如果存在system prompt，将思考协议添加到其中
@@ -203,7 +204,7 @@ async function handleCompletions (req, apiKey) {
     if (msg.role === "system") {
       return {
         ...msg,
-        content: `system origin prompt: \n${msg.content}\n\n模型思考过程：\n${reasoningContent}\n思考内容如上，接下来请结合思考内容和用户输入，组织给用户的最终回复。`
+        content: `system origin prompt: \n${originSystemPrompt}\n\n模型根据用户输入的思考过程：\n${reasoningContent}\n思考内容如上，接下来请结合思考内容和用户输入，组织应该给用户回复的最终内容。`
       };
     }
     return msg;
