@@ -345,8 +345,9 @@ const transformMessages = async (messages, reasoning_content, isThinkingRequest 
         // 第二次请求：将思考结果添加到原system prompt末尾
         item.content = `${item.content}\n\n思考过程：\n${reasoning_content}`;
       }
-      delete item.role;
-      system_instruction = await transformMsg(item);
+      system_instruction = await transformMsg({
+        content: item.content
+      });
     } else {
       item.role = item.role === "assistant" ? "model" : "user";
       contents.push(await transformMsg(item));
