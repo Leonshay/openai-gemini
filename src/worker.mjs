@@ -144,7 +144,7 @@ async function handleCompletions (req, apiKey) {
     ...req,
     messages: req.messages || []
   };
-  
+
   const thinkingResponse = await fetch(`${BASE_URL}/${API_VERSION}/models/${DEFAULT_MODEL}:generateContent`, {
     method: "POST",
     headers: makeHeaders(apiKey, { "Content-Type": "application/json" }),
@@ -393,7 +393,7 @@ const transformCandidates = (key, cand, reasoning_content) => ({
   [key]: {
     role: "assistant",
     content: cand.content?.parts.map(p => p.text).join(SEP),
-    reasoning_content: reasoning_content },
+    reasoning_content: reasoning_content || null },
   logprobs: null,
   finish_reason: reasonsMap[cand.finishReason] || cand.finishReason,
 });
