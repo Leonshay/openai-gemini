@@ -393,7 +393,8 @@ const transformCandidates = (key, cand, reasoning_content) => ({
   [key]: {
     role: "assistant",
     content: cand.content?.parts.map(p => p.text).join(SEP),
-    reasoning_content: reasoning_content },
+    reasoning_content: reasoning_content
+  },
   logprobs: null,
   finish_reason: reasonsMap[cand.finishReason] || cand.finishReason,
 });
@@ -406,13 +407,12 @@ const transformUsage = (data) => ({
   total_tokens: data.totalTokenCount
 });
 
-const processCompletionsResponse = (data, model, id) => {
+const processCompletionsResponse = (data, model, id, reasoning_content) => {
   return JSON.stringify({
     id,
-    choices: data.candidates.map(transformCandidatesMessage),
+    choices: data.candidates.map(cand => transformCandidatesMessage(cand, reasoning_content)),
     created: Math.floor(Date.now()/1000),
     model,
-    //system_fingerprint: "fp_69829325d0",
     object: "chat.completion",
     usage: transformUsage(data.usageMetadata),
   });
