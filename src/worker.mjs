@@ -1,13 +1,13 @@
-import { Buffer } from "node:buffer";
+import {Buffer} from "node:buffer";
 
 export default {
-  async fetch (request) {
+  async fetch(request) {
     if (request.method === "OPTIONS") {
       return handleOPTIONS();
     }
     const errHandler = (err) => {
       console.error(err);
-      return new Response(err.message, fixCors({ status: err.status ?? 500 }));
+      return new Response(err.message, fixCors({status: err.status ?? 500}));
     };
     try {
       const auth = request.headers.get("Authorization");
@@ -17,7 +17,7 @@ export default {
           throw new HttpError("The specified HTTP method is not allowed for the requested resource", 400);
         }
       };
-      const { pathname } = new URL(request.url);
+      const {pathname} = new URL(request.url);
       switch (true) {
         case pathname.endsWith("/chat/completions"):
           assert(request.method === "POST");
@@ -48,10 +48,10 @@ class HttpError extends Error {
   }
 }
 
-const fixCors = ({ headers, status, statusText }) => {
+const fixCors = ({headers, status, statusText}) => {
   headers = new Headers(headers);
   headers.set("Access-Control-Allow-Origin", "*");
-  return { headers, status, statusText };
+  return {headers, status, statusText};
 };
 
 const handleOPTIONS = async () => {
@@ -71,20 +71,20 @@ const API_VERSION = "v1beta";
 const API_CLIENT = "genai-js/0.21.0"; // npm view @google/generative-ai version
 const makeHeaders = (apiKey, more) => ({
   "x-goog-api-client": API_CLIENT,
-  ...(apiKey && { "x-goog-api-key": apiKey }),
+  ...(apiKey && {"x-goog-api-key": apiKey}),
   ...more
 });
 
-async function handleModels (apiKey) {
+async function handleModels(apiKey) {
   const response = await fetch(`${BASE_URL}/${API_VERSION}/models`, {
     headers: makeHeaders(apiKey),
   });
-  let { body } = response;
+  let {body} = response;
   if (response.ok) {
-    const { models } = JSON.parse(await response.text());
+    const {models} = JSON.parse(await response.text());
     body = JSON.stringify({
       object: "list",
-      data: models.map(({ name }) => ({
+      data: models.map(({name}) => ({
         id: name.replace("models/", ""),
         object: "model",
         created: 0,
@@ -96,12 +96,13 @@ async function handleModels (apiKey) {
 }
 
 const DEFAULT_EMBEDDINGS_MODEL = "text-embedding-004";
-async function handleEmbeddings (req, apiKey) {
+
+async function handleEmbeddings(req, apiKey) {
   if (typeof req.model !== "string") {
     throw new HttpError("model is not specified", 400);
   }
   if (!Array.isArray(req.input)) {
-    req.input = [ req.input ];
+    req.input = [req.input];
   }
   let model;
   if (req.model.startsWith("models/")) {
@@ -112,21 +113,21 @@ async function handleEmbeddings (req, apiKey) {
   }
   const response = await fetch(`${BASE_URL}/${API_VERSION}/${model}:batchEmbedContents`, {
     method: "POST",
-    headers: makeHeaders(apiKey, { "Content-Type": "application/json" }),
+    headers: makeHeaders(apiKey, {"Content-Type": "application/json"}),
     body: JSON.stringify({
       "requests": req.input.map(text => ({
         model,
-        content: { parts: { text } },
+        content: {parts: {text}},
         outputDimensionality: req.dimensions,
       }))
     })
   });
-  let { body } = response;
+  let {body} = response;
   if (response.ok) {
-    const { embeddings } = JSON.parse(await response.text());
+    const {embeddings} = JSON.parse(await response.text());
     body = JSON.stringify({
       object: "list",
-      data: embeddings.map(({ values }, index) => ({
+      data: embeddings.map(({values}, index) => ({
         object: "embedding",
         index,
         embedding: values,
@@ -138,9 +139,10 @@ async function handleEmbeddings (req, apiKey) {
 }
 
 const DEFAULT_MODEL = "gemini-1.5-pro-latest";
-async function handleCompletions (req, apiKey) {
+
+async function handleCompletions(req, apiKey) {
   let model = DEFAULT_MODEL;
-  switch(true) {
+  switch (true) {
     case typeof req.model !== "string":
       break;
     case req.model.startsWith("models/"):
@@ -152,11 +154,65 @@ async function handleCompletions (req, apiKey) {
   }
   const TASK = req.stream ? "streamGenerateContent" : "generateContent";
   let url = `${BASE_URL}/${API_VERSION}/models/${model}:${TASK}`;
-  if (req.stream) { url += "?alt=sse"; }
+  if (req.stream) {
+    url += "?alt=sse";
+  }
+
+
+  // 保存原始请求参数
+  const originalReq = {...req, stream: req.stream};
+  const originalSystemPrompt = req.messages?.find(m => m.role === "system")?.content || "";
+
+  // 第一步：发送思考请求
+  const thinkingReq = {
+    ...req,
+    stream: false,
+    messages: [
+      {
+        role: "system",
+        content: `
+思考协议：
+请你仔细思考并分析问题，按照以下步骤进行：
+1. 理解问题的核心和关键点
+2. 分析可能的解决方案
+3. 评估每个方案的优劣
+4. 选择最佳方案并说明原因
+5. 给出具体的执行步骤
+
+original system prompt:
+${originalSystemPrompt}
+`
+      },
+      ...req.messages.filter(m => m.role !== "system")
+    ]
+  };
+
+  const thinkingResponse = await fetch(`${BASE_URL}/${API_VERSION}/models/${model}:generateContent`, {
+    method: "POST",
+    headers: makeHeaders(apiKey, {"Content-Type": "application/json"}),
+    body: JSON.stringify(await transformRequest(thinkingReq))
+  });
+
+  // 解析思考结果
+  const thinkingResult = await thinkingResponse.json();
+  const thinkingContent = thinkingResult.candidates?.[0]?.content?.parts?.[0]?.text || "";
+
+  // 第二步：发送最终请求
+  const finalReq = {
+    ...originalReq,
+    messages: [
+      {
+        role: "system",
+        content: `${originalSystemPrompt}\n\n### 模型思考过程：\n${thinkingContent}\n---\n请根据模型思考撰写最终回复。`
+      },
+      ...originalReq.messages.filter(m => m.role !== "system")
+    ]
+  };
+
   const response = await fetch(url, {
     method: "POST",
-    headers: makeHeaders(apiKey, { "Content-Type": "application/json" }),
-    body: JSON.stringify(await transformRequest(req)), // try
+    headers: makeHeaders(apiKey, {"Content-Type": "application/json"}),
+    body: JSON.stringify(await transformRequest(finalReq)), // try
   });
 
   let body = response.body;
@@ -179,7 +235,12 @@ async function handleCompletions (req, apiKey) {
         .pipeThrough(new TextEncoderStream());
     } else {
       body = await response.text();
-      body = processCompletionsResponse(JSON.parse(body), model, id);
+      body = processCompletionsResponse(
+        JSON.parse(body),
+        model,
+        id,
+        originalReq.stream === false ? thinkingContent : null // 仅非流式时包含
+      );
     }
   }
   return new Response(body, fixCors(response));
@@ -217,14 +278,14 @@ const transformConfig = (req) => {
     }
   }
   if (req.response_format) {
-    switch(req.response_format.type) {
+    switch (req.response_format.type) {
       case "json_schema":
         cfg.responseSchema = req.response_format.json_schema?.schema;
         if (cfg.responseSchema && "enum" in cfg.responseSchema) {
           cfg.responseMimeType = "text/x.enum";
           break;
         }
-        // eslint-disable-next-line no-fallthrough
+      // eslint-disable-next-line no-fallthrough
       case "json_object":
         cfg.responseMimeType = "application/json";
         break;
@@ -256,7 +317,7 @@ const parseImg = async (url) => {
     if (!match) {
       throw new Error("Invalid image data: " + url);
     }
-    ({ mimeType, data } = match.groups);
+    ({mimeType, data} = match.groups);
   }
   return {
     inlineData: {
@@ -266,13 +327,13 @@ const parseImg = async (url) => {
   };
 };
 
-const transformMsg = async ({ role, content }) => {
+const transformMsg = async ({role, content}) => {
   const parts = [];
   if (!Array.isArray(content)) {
     // system, user: string
     // assistant: string or null (Required unless tool_calls is specified.)
-    parts.push({ text: content });
-    return { role, parts };
+    parts.push({text: content});
+    return {role, parts};
   }
   // user:
   // An array of content parts with a defined type.
@@ -281,7 +342,7 @@ const transformMsg = async ({ role, content }) => {
   for (const item of content) {
     switch (item.type) {
       case "text":
-        parts.push({ text: item.text });
+        parts.push({text: item.text});
         break;
       case "image_url":
         parts.push(await parseImg(item.image_url.url));
@@ -299,13 +360,15 @@ const transformMsg = async ({ role, content }) => {
     }
   }
   if (content.every(item => item.type === "image_url")) {
-    parts.push({ text: "" }); // to avoid "Unable to submit request because it must have a text parameter"
+    parts.push({text: ""}); // to avoid "Unable to submit request because it must have a text parameter"
   }
-  return { role, parts };
+  return {role, parts};
 };
 
 const transformMessages = async (messages) => {
-  if (!messages) { return; }
+  if (!messages) {
+    return;
+  }
   const contents = [];
   let system_instruction;
   for (const item of messages) {
@@ -318,10 +381,10 @@ const transformMessages = async (messages) => {
     }
   }
   if (system_instruction && contents.length === 0) {
-    contents.push({ role: "model", parts: { text: " " } });
+    contents.push({role: "model", parts: {text: " "}});
   }
   //console.info(JSON.stringify(contents, 2));
-  return { system_instruction, contents };
+  return {system_instruction, contents};
 };
 
 const transformRequest = async (req) => ({
@@ -333,11 +396,11 @@ const transformRequest = async (req) => ({
 const generateChatcmplId = () => {
   const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   const randomChar = () => characters[Math.floor(Math.random() * characters.length)];
-  return "chatcmpl-" + Array.from({ length: 29 }, randomChar).join("");
+  return "chatcmpl-" + Array.from({length: 29}, randomChar).join("");
 };
 
 const reasonsMap = { //https://ai.google.dev/api/rest/v1/GenerateContentResponse#finishreason
-  //"FINISH_REASON_UNSPECIFIED": // Default value. This value is unused.
+                     //"FINISH_REASON_UNSPECIFIED": // Default value. This value is unused.
   "STOP": "stop",
   "MAX_TOKENS": "length",
   "SAFETY": "content_filter",
@@ -350,7 +413,8 @@ const transformCandidates = (key, cand) => ({
   index: cand.index || 0, // 0-index is absent in new -002 models response
   [key]: {
     role: "assistant",
-    content: cand.content?.parts.map(p => p.text).join(SEP) },
+    content: cand.content?.parts.map(p => p.text).join(SEP)
+  },
   logprobs: null,
   finish_reason: reasonsMap[cand.finishReason] || cand.finishReason,
 });
@@ -363,45 +427,61 @@ const transformUsage = (data) => ({
   total_tokens: data.totalTokenCount
 });
 
-const processCompletionsResponse = (data, model, id) => {
+const processCompletionsResponse = (data, model, id, reasoningContent) => {
   return JSON.stringify({
     id,
     choices: data.candidates.map(transformCandidatesMessage),
-    created: Math.floor(Date.now()/1000),
+    created: Math.floor(Date.now() / 1000),
     model,
     //system_fingerprint: "fp_69829325d0",
     object: "chat.completion",
     usage: transformUsage(data.usageMetadata),
+    // 新增推理内容字段
+    ...(reasoningContent && { reasoning_content: reasoningContent })
   });
 };
 
 const responseLineRE = /^data: (.*)(?:\n\n|\r\r|\r\n\r\n)/;
-async function parseStream (chunk, controller) {
+
+async function parseStream(chunk, controller) {
   chunk = await chunk;
-  if (!chunk) { return; }
+  if (!chunk) {
+    return;
+  }
   this.buffer += chunk;
   do {
     const match = this.buffer.match(responseLineRE);
-    if (!match) { break; }
+    if (!match) {
+      break;
+    }
     controller.enqueue(match[1]);
     this.buffer = this.buffer.substring(match[0].length);
   } while (true); // eslint-disable-line no-constant-condition
 }
-async function parseStreamFlush (controller) {
+
+async function parseStreamFlush(controller) {
   if (this.buffer) {
     console.error("Invalid data:", this.buffer);
     controller.enqueue(this.buffer);
   }
 }
 
-function transformResponseStream (data, stop, first) {
+function transformResponseStream(data, stop, first) {
   const item = transformCandidatesDelta(data.candidates[0]);
-  if (stop) { item.delta = {}; } else { item.finish_reason = null; }
-  if (first) { item.delta.content = ""; } else { delete item.delta.role; }
+  if (stop) {
+    item.delta = {};
+  } else {
+    item.finish_reason = null;
+  }
+  if (first) {
+    item.delta.content = "";
+  } else {
+    delete item.delta.role;
+  }
   const output = {
     id: this.id,
     choices: [item],
-    created: Math.floor(Date.now()/1000),
+    created: Math.floor(Date.now() / 1000),
     model: this.model,
     //system_fingerprint: "fp_69829325d0",
     object: "chat.completion.chunk",
@@ -411,11 +491,15 @@ function transformResponseStream (data, stop, first) {
   }
   return "data: " + JSON.stringify(output) + delimiter;
 }
+
 const delimiter = "\n\n";
-async function toOpenAiStream (chunk, controller) {
+
+async function toOpenAiStream(chunk, controller) {
   const transform = transformResponseStream.bind(this);
   const line = await chunk;
-  if (!line) { return; }
+  if (!line) {
+    return;
+  }
   let data;
   try {
     data = JSON.parse(line);
@@ -423,12 +507,12 @@ async function toOpenAiStream (chunk, controller) {
     console.error(line);
     console.error(err);
     const length = this.last.length || 1; // at least 1 error msg
-    const candidates = Array.from({ length }, (_, index) => ({
+    const candidates = Array.from({length}, (_, index) => ({
       finishReason: "error",
-      content: { parts: [{ text: err }] },
+      content: {parts: [{text: err}]},
       index,
     }));
-    data = { candidates };
+    data = {candidates};
   }
   const cand = data.candidates[0];
   console.assert(data.candidates.length === 1, "Unexpected candidates count: %d", data.candidates.length);
@@ -441,7 +525,8 @@ async function toOpenAiStream (chunk, controller) {
     controller.enqueue(transform(data));
   }
 }
-async function toOpenAiStreamFlush (controller) {
+
+async function toOpenAiStreamFlush(controller) {
   const transform = transformResponseStream.bind(this);
   if (this.last.length > 0) {
     for (const data of this.last) {
