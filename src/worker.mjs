@@ -138,6 +138,15 @@ async function handleEmbeddings (req, apiKey) {
 }
 
 const DEFAULT_MODEL = "gemini-1.5-pro-latest";
+
+// 思考协议的默认内容
+const THINKING_PROTOCOL = `请你仔细思考并分析问题，按照以下步骤进行：
+1. 理解问题的核心和关键点
+2. 分析可能的解决方案
+3. 评估每个方案的优劣
+4. 选择最佳方案并说明原因
+5. 给出具体的执行步骤`;
+
 async function handleCompletions (req, apiKey) {
   let model = DEFAULT_MODEL;
   switch(true) {
@@ -150,20 +159,66 @@ async function handleCompletions (req, apiKey) {
     case req.model.startsWith("learnlm-"):
       model = req.model;
   }
+
+  // 第一步：处理思考协议
+  const messages = req.messages || [];
+  let systemPrompt = messages.find(msg => msg.role === "system");
+  let thinkingProtocol = req.thinking_protocol || THINKING_PROTOCOL;
+
+  // 如果存在system prompt，将思考协议添加到其中
+  if (systemPrompt) {
+    systemPrompt.content = `${systemPrompt.content}\n\n思考协议：\n${thinkingProtocol}`;
+  } else {
+    // 如果不存在，创建新的system prompt
+    messages.unshift({
+      role: "system",
+      content: `思考协议：\n${thinkingProtocol}`
+    });
+  }
+
+  // 第二步：发送内部请求获取思考过程
   const TASK = req.stream ? "streamGenerateContent" : "generateContent";
   let url = `${BASE_URL}/${API_VERSION}/models/${model}:${TASK}`;
   if (req.stream) { url += "?alt=sse"; }
-  const response = await fetch(url, {
+
+  // 发送第一次请求获取思考过程
+  const firstResponse = await fetch(url, {
     method: "POST",
     headers: makeHeaders(apiKey, { "Content-Type": "application/json" }),
-    body: JSON.stringify(await transformRequest(req)), // try
+    body: JSON.stringify(await transformRequest({ ...req, messages })),
   });
 
-  let body = response.body;
-  if (response.ok) {
-    let id = generateChatcmplId(); //"chatcmpl-8pMMaqXMK68B3nyDBrapTDrhkHBQK";
+  if (!firstResponse.ok) {
+    return new Response(firstResponse.body, fixCors(firstResponse));
+  }
+
+  // 解析第一次响应获取思考过程
+  const firstResponseData = JSON.parse(await firstResponse.text());
+  const reasoningContent = firstResponseData.candidates[0].content.parts[0].text;
+
+  // 第三步：将思考过程添加到system prompt
+  const finalMessages = messages.map(msg => {
+    if (msg.role === "system") {
+      return {
+        ...msg,
+        content: `${msg.content}\n\n思考过程：\n${reasoningContent}`
+      };
+    }
+    return msg;
+  });
+
+  // 第四步：发送最终请求
+  const finalResponse = await fetch(url, {
+    method: "POST",
+    headers: makeHeaders(apiKey, { "Content-Type": "application/json" }),
+    body: JSON.stringify(await transformRequest({ ...req, messages: finalMessages })),
+  });
+
+  let body = finalResponse.body;
+  if (finalResponse.ok) {
+    let id = generateChatcmplId();
     if (req.stream) {
-      body = response.body
+      body = finalResponse.body
         .pipeThrough(new TextDecoderStream())
         .pipeThrough(new TransformStream({
           transform: parseStream,
@@ -178,11 +233,29 @@ async function handleCompletions (req, apiKey) {
         }))
         .pipeThrough(new TextEncoderStream());
     } else {
-      body = await response.text();
-      body = processCompletionsResponse(JSON.parse(body), model, id);
+      const finalResponseData = JSON.parse(await finalResponse.text());
+      // 添加思考过程到响应中
+      const finalContent = finalResponseData.candidates[0].content.parts[0].text;
+      body = JSON.stringify({
+        id,
+        choices: [{
+          index: 0,
+          message: {
+            role: "assistant",
+            content: finalContent,
+            reasoning_content: reasoningContent
+          },
+          logprobs: null,
+          finish_reason: finalResponseData.candidates[0].finishReason
+        }],
+        created: Math.floor(Date.now()/1000),
+        model,
+        object: "chat.completion",
+        usage: finalResponseData.usageMetadata
+      });
     }
   }
-  return new Response(body, fixCors(response));
+  return new Response(body, fixCors(finalResponse));
 }
 
 const harmCategory = [
