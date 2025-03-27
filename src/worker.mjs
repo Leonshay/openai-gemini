@@ -445,7 +445,7 @@ const processCompletionsResponse = (data, model, id, reasoningContent) => {
     object: "chat.completion",
     usage: transformUsage(data.usageMetadata),
     // 新增推理内容字段
-    ...(reasoningContent && {reasoning_content: reasoningContent})
+    reasoning_content: reasoningContent
   });
 };
 
