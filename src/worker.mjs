@@ -168,21 +168,10 @@ async function handleCompletions(req, apiKey) {
       ?.content
       ?.map?.(item => {
         if (typeof item === 'string') return item;
-        // 结构化处理对象内容
-        return Object.entries(item)
-          .map(([key, value]) => {
-            if (typeof value === 'object') {
-              // 处理嵌套对象
-              return `${key}: ${JSON.stringify(value, null, 2)}`;
-            }
-            return `${key}: ${value}`;
-          })
-          .join('\n');
+        return JSON.stringify(item, null, 2); // 直接序列化对象
       })
-      ?.join("\n\n") // 用空行分隔不同内容项
+      ?.join("\n\n") // 保持空行分隔
     || "";
-
-
 
   console.log("originalReq:", originalReq)
   console.log("originalSystemPrompt:", originalSystemPrompt)
