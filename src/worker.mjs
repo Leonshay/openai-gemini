@@ -162,7 +162,7 @@ async function handleCompletions(req, apiKey) {
 
   // 保存原始请求参数
   const originalReq = {...req, stream: req.stream};
-  const originalSystemPrompt = req.messages?.find(m => m.role === "system");
+  const originalSystemPrompt = req.messages?.find(m => m.role === "system").toString();
 
   console.log("originalReq:", originalReq)
   console.log("originalSystemPrompt:", originalSystemPrompt)
