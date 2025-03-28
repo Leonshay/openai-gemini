@@ -165,6 +165,8 @@ async function handleCompletions(req, apiKey) {
   const originalReq = {...req, stream: req.stream};
   const originalSystemPrompt = req.messages?.find(m => m.role === "system")?.content || "";
 
+  console.log("originalReq:", originalReq)
+
   // 第一步：发送思考请求
   const thinkingReq = {
     ...req,
@@ -488,13 +490,15 @@ ${originalSystemPrompt}
       })).choices[0]?.message?.content;
   } else thinkingContent = "无"
 
+  console.log("thinkingContent: ", thinkingContent)
+
   // 第二步：发送最终请求
   const finalReq = {
     ...originalReq,
     messages: [
       {
         role: "system",
-        content: `# 思考过程：\n${thinkingContent}\n\n# original system prompt:${originalSystemPrompt}\n\n---\n\n请根据用户输入，参考思考过程，并确保绝对优先遵守original system prompt的指令（角色设定/工作流/输出格式要求等，如要求极其精炼则进行总结控制字数），结合这三者组织撰写最终回复。`
+        content: `# 根据用户输入产生的思考过程：\n${thinkingContent}\n\n# original system prompt:${originalSystemPrompt}\n\n---\n\n请根据用户输入，参考思考过程，并确保绝对优先遵守original system prompt的指令，并确保绝对优先遵守original system prompt的指令，并确保绝对优先遵守original system prompt的指令，结合这三者以original system prompt的输出要求来组织撰写最终回复。`
       },
       ...originalReq.messages.filter(m => m.role !== "system")
     ]
