@@ -166,12 +166,26 @@ async function handleCompletions(req, apiKey) {
   const originalSystemPrompt = req.messages
       ?.find(m => m.role === "system")
       ?.content
-      // 处理数组类型的content（如包含text/image等元素）
-      ?.map?.(item => item.text ?? "")
-      ?.join("\n")
+      ?.map?.(item => {
+        if (typeof item === 'string') return item;
+        // 结构化处理对象内容
+        return Object.entries(item)
+          .map(([key, value]) => {
+            if (typeof value === 'object') {
+              // 处理嵌套对象
+              return `${key}: ${JSON.stringify(value, null, 2)}`;
+            }
+            return `${key}: ${value}`;
+          })
+          .join('\n');
+      })
+      ?.join("\n\n") // 用空行分隔不同内容项
     || "";
 
+
+
   console.log("originalReq:", originalReq)
+  console.log("originalSystemPrompt:", originalSystemPrompt)
 
   // 第一步：发送思考请求
   const thinkingReq = {
@@ -504,7 +518,7 @@ ${originalSystemPrompt}
     messages: [
       {
         role: "system",
-        content: `# original system prompt:${originalSystemPrompt}\n\n# 根据用户输入产生的思考过程：\n${thinkingContent}\n\n# original system prompt:${originalSystemPrompt}\n\n---\n\n请根据用户输入，参考思考过程，并确保绝对优先遵守original system prompt的指令，并确保绝对优先遵守original system prompt的指令，并确保绝对优先遵守original system prompt的指令，结合这三者以original system prompt的输出要求来组织撰写最终回复。`
+        content: `# 根据用户输入产生的思考过程：\n${thinkingContent}\n\n# original system prompt:${originalSystemPrompt}\n\n---\n\n请根据用户输入，参考思考过程，并确保绝对优先遵守original system prompt的指令，结合这三者以original system prompt的输出要求来组织撰写最终回复。`
       },
       ...originalReq.messages.filter(m => m.role !== "system")
     ]
