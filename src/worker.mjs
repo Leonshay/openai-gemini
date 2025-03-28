@@ -141,7 +141,6 @@ async function handleEmbeddings(req, apiKey) {
 const DEFAULT_MODEL = "gemini-1.5-pro-latest";
 
 
-
 async function handleCompletions(req, apiKey) {
   let model = DEFAULT_MODEL;
   switch (true) {
@@ -163,15 +162,8 @@ async function handleCompletions(req, apiKey) {
 
   // 保存原始请求参数
   const originalReq = {...req, stream: req.stream};
-  const originalSystemPrompt = req.messages
-      ?.find(m => m.role === "system")
-      ?.content
-      ?.map?.(item => {
-        if (typeof item === 'string') return item;
-        return JSON.stringify(item, null, 2); // 直接序列化对象
-      })
-      ?.join("\n\n") // 保持空行分隔
-    || "";
+  const originalSystemPrompt = JSON.stringify(req.messages?.find(m => m.role === "system"));
+
 
   console.log("originalReq:", originalReq)
   console.log("originalSystemPrompt:", originalSystemPrompt)
@@ -712,7 +704,7 @@ const generateChatcmplId = () => {
 };
 
 const reasonsMap = { //https://ai.google.dev/api/rest/v1/GenerateContentResponse#finishreason
-  //"FINISH_REASON_UNSPECIFIED": // Default value. This value is unused.
+                     //"FINISH_REASON_UNSPECIFIED": // Default value. This value is unused.
   "STOP": "stop",
   "MAX_TOKENS": "length",
   "SAFETY": "content_filter",
