@@ -162,9 +162,21 @@ async function handleCompletions(req, apiKey) {
 
   // 保存原始请求参数
   const originalReq = {...req, stream: req.stream};
-  const originalSystemPrompt = JSON.stringify(req.messages?.find(m => m.role === "system"))
-    // 替换转义换行符为真实换行
-    .replace(/\\n/g, '\n');
+  let originalSystemPrompt = "";
+  const systemMessage = req.messages?.find(m => m.role === "system");
+  if (systemMessage) {
+    const content = systemMessage.content;
+    if (Array.isArray(content)) {
+      originalSystemPrompt = content
+        .filter(item => item.text && typeof item.text === 'string')
+        .map(item => item.text)
+        .join('\n');
+    } else if (typeof content === 'string') {
+      originalSystemPrompt = content;
+    }
+  }
+  originalSystemPrompt = originalSystemPrompt || "无系统提示词";
+
 
   console.log("originalReq:", originalReq)
   console.log("originalSystemPrompt:", originalSystemPrompt)
