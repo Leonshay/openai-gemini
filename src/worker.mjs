@@ -163,7 +163,13 @@ async function handleCompletions(req, apiKey) {
 
   // 保存原始请求参数
   const originalReq = {...req, stream: req.stream};
-  const originalSystemPrompt = req.message?.find(m => m.role === "system")?.content || "";
+  const originalSystemPrompt = req.messages
+      ?.find(m => m.role === "system")
+      ?.content
+      // 处理数组类型的content（如包含text/image等元素）
+      ?.map?.(item => item.text ?? "")
+      ?.join("\n")
+    || "";
 
   console.log("originalReq:", originalReq)
 
