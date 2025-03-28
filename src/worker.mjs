@@ -162,8 +162,7 @@ async function handleCompletions(req, apiKey) {
 
   // 保存原始请求参数
   const originalReq = {...req, stream: req.stream};
-  const originalSystemPrompt = JSON.stringify(req.messages?.find(m => m.role === "system"));
-
+  const originalSystemPrompt = req.messages?.find(m => m.role === "system");
 
   console.log("originalReq:", originalReq)
   console.log("originalSystemPrompt:", originalSystemPrompt)
@@ -499,7 +498,18 @@ ${originalSystemPrompt}
     messages: [
       {
         role: "system",
-        content: `# 根据用户输入产生的思考过程：\n${thinkingContent}\n\n# original system prompt:${originalSystemPrompt}\n\n---\n\n请根据用户输入，参考思考过程，并确保绝对优先遵守original system prompt的指令，结合这三者以original system prompt的输出要求来组织撰写最终回复。`
+        content: `
+# 根据用户输入产生的思考过程：
+
+${thinkingContent}
+
+# original system prompt:
+
+${originalSystemPrompt}
+
+---
+
+请根据用户输入，参考思考过程，并确保绝对优先遵守original system prompt的指令，结合这三者以original system prompt的输出要求来组织撰写最终回复。`
       },
       ...originalReq.messages.filter(m => m.role !== "system")
     ]
