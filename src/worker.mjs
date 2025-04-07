@@ -395,10 +395,12 @@ ${originalSystemPrompt}
   // 如果不是流式请求，直接发送最终请求
   if (!req.stream) {
     const response = await sendFinalRequest();
-
-    let body = response?.body;
+    
+    // 生成唯一ID
+    let id = generateChatcmplId();
+    let body = "";
+    
     if (response?.ok) {
-      let id = generateChatcmplId(); //"chatcmpl-8pMMaqXMK68B3nyDBrapTDrhkHBQK";
       // 非流式请求处理
       body = response.body
         .pipeThrough(new TextDecoderStream())
@@ -414,7 +416,7 @@ ${originalSystemPrompt}
           model, id, last: [],
         }))
         .pipeThrough(new TextEncoderStream());
-    } else {
+    } else if (response) {
       body = await response.text();
       body = processCompletionsResponse(
         JSON.parse(body),
@@ -431,8 +433,12 @@ ${originalSystemPrompt}
       // 将修改后的对象重新转换为 JSON 字符串
       body = JSON.stringify(parsedBody);
     }
+    
+    return new Response(body, fixCors(response || {status: 500}));
   }
-  return new Response(body, fixCors(response));
+  
+  // 流式请求已在前面处理并返回，如果代码执行到这里，说明出现了错误
+  return new Response("Error processing request", fixCors({status: 500, statusText: "Internal Server Error"}));
 }
 
 const harmCategory = [
