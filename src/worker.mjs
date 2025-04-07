@@ -487,12 +487,12 @@ ${originalSystemPrompt}
   // 根据是否为流式请求选择不同的处理方式
   let thinkingContent = "无";
   let thinkingResponse;
-  
+
   if (req.stream) {
     // 流式思考请求处理
     const TASK = "streamGenerateContent";
     let thinkingUrl = `${BASE_URL}/${API_VERSION}/models/${model}:${TASK}?alt=sse`;
-    
+
     thinkingResponse = await fetch(thinkingUrl, {
       method: "POST",
       headers: makeHeaders(apiKey, {"Content-Type": "application/json"}),
@@ -500,8 +500,8 @@ ${originalSystemPrompt}
     });
 
     console.log("stream_thinking_request: ", thinkingReq);
-    
-    
+
+
     if (thinkingResponse.ok) {
       // 创建一个TransformStream来处理思考流
       const thinkingStream = thinkingResponse.body
@@ -511,11 +511,11 @@ ${originalSystemPrompt}
           flush: parseStreamFlush,
           buffer: "",
         }));
-      
+
       // 收集思考内容
       const reader = thinkingStream.getReader();
       const thinkingChunks = [];
-      
+
       // 创建一个新的ReadableStream来发送给用户
       const userStream = new ReadableStream({
         async start(controller) {
@@ -524,14 +524,14 @@ ${originalSystemPrompt}
             while (true) {
               const {done, value} = await reader.read();
               if (done) break;
-              
+
               if (value) {
                 try {
                   const data = JSON.parse(value);
                   const cand = data.candidates?.[0];
                   if (cand?.content?.parts?.[0]?.text) {
                     thinkingChunks.push(cand.content.parts[0].text);
-                    
+
                     // 创建一个类似OpenAI格式的响应块，但content为null，reasoning_content包含思考内容
                     const openAIChunk = {
                       id: generateChatcmplId(),
@@ -548,7 +548,7 @@ ${originalSystemPrompt}
                         finish_reason: null
                       }]
                     };
-                    
+
                     // 发送给用户
                     controller.enqueue("data: " + JSON.stringify(openAIChunk) + delimiter);
                   }
@@ -557,13 +557,13 @@ ${originalSystemPrompt}
                 }
               }
             }
-            
+
             // 合并所有思考内容
             thinkingContent = thinkingChunks.join("");
-            
+
             // 第二步：发送最终请求
             await sendFinalRequest(controller);
-            
+
             // 完成流
             controller.enqueue("data: [DONE]" + delimiter);
             controller.close();
@@ -573,7 +573,7 @@ ${originalSystemPrompt}
           }
         }
       });
-      
+
       // 返回处理后的流
       return new Response(userStream.pipeThrough(new TextEncoderStream()), fixCors(thinkingResponse));
     }
@@ -628,7 +628,7 @@ ${originalSystemPrompt}
       headers: makeHeaders(apiKey, {"Content-Type": "application/json"}),
       body: JSON.stringify(await transformRequest(finalReq)), // try
     });
-    
+
     // 如果是流式请求且有controller（来自第一步的流处理）
     if (req.stream && controller) {
       if (response.ok) {
@@ -640,12 +640,12 @@ ${originalSystemPrompt}
             buffer: "",
           }))
           .getReader();
-          
+
         // 读取并处理最终流
         while (true) {
           const {done, value} = await reader.read();
           if (done) break;
-          
+
           if (value) {
             try {
               const data = JSON.parse(value);
@@ -666,7 +666,7 @@ ${originalSystemPrompt}
                     finish_reason: cand.finishReason ? reasonsMap[cand.finishReason] || cand.finishReason : null
                   }]
                 };
-                
+
                 // 发送给用户
                 controller.enqueue("data: " + JSON.stringify(openAIChunk) + delimiter);
               }
@@ -675,39 +675,23 @@ ${originalSystemPrompt}
             }
           }
         }
-        
+
         return null; // 已经在流中处理了响应
       }
     }
-    
+
     return response; // 返回响应供非流式处理使用
   }
-  
+
   // 如果不是流式请求，直接发送最终请求
   if (!req.stream) {
     const response = await sendFinalRequest();
-    
+
     // 生成唯一ID
     let id = generateChatcmplId();
     let body = "";
-    
+
     if (response?.ok) {
-      // 非流式请求处理
-      body = response.body
-        .pipeThrough(new TextDecoderStream())
-        .pipeThrough(new TransformStream({
-          transform: parseStream,
-          flush: parseStreamFlush,
-          buffer: "",
-        }))
-        .pipeThrough(new TransformStream({
-          transform: toOpenAiStream,
-          flush: toOpenAiStreamFlush,
-          streamIncludeUsage: req.stream_options?.include_usage,
-          model, id, last: [],
-        }))
-        .pipeThrough(new TextEncoderStream());
-    } else if (response) {
       body = await response.text();
       body = processCompletionsResponse(
         JSON.parse(body),
@@ -724,10 +708,10 @@ ${originalSystemPrompt}
       // 将修改后的对象重新转换为 JSON 字符串
       body = JSON.stringify(parsedBody);
     }
-    
+
     return new Response(body, fixCors(response || {status: 500}));
   }
-  
+
   // 流式请求已在前面处理并返回，如果代码执行到这里，说明出现了错误
   return new Response("Error processing request", fixCors({status: 500, statusText: "Internal Server Error"}));
 }
@@ -919,7 +903,7 @@ const processCompletionsResponse = (data, model, id) => {
     console.log("Detected direct Gemini API response format in non-streaming mode, converting...");
     model = data.modelVersion || model;
   }
-  
+
   return JSON.stringify({
     id,
     choices: data.candidates.map(transformCandidatesMessage),
