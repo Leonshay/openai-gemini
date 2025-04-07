@@ -678,7 +678,8 @@ ${originalSystemPrompt}
           }
         }
 
-        return null; // 已经在流中处理了响应
+        // 已经在流中处理了响应，但需要返回带有CORS头的Response对象
+        return new Response(null, fixCors(response));
       }
     }
 
