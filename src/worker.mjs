@@ -713,16 +713,9 @@ ${originalSystemPrompt}
         JSON.parse(body),
         model,
         id,
+        thinkingContent // 传递思考内容作为参数
       );
-      // 解析处理后的 JSON 对象
-      let parsedBody = JSON.parse(body);
-
-      // 在每个 message 中添加 reasoning_content 字段
-      parsedBody.choices.forEach(choice => {
-        choice.message.reasoning_content = thinkingContent;
-      });
-      // 将修改后的对象重新转换为 JSON 字符串
-      body = JSON.stringify(parsedBody);
+      // 不需要额外解析和修改，因为processCompletionsResponse已经处理了reasoning_content
     }
     
     return new Response(body, fixCors(response || {status: 500}));
@@ -913,22 +906,32 @@ const transformUsage = (data) => ({
   total_tokens: data.totalTokenCount
 });
 
-const processCompletionsResponse = (data, model, id) => {
+const processCompletionsResponse = (data, model, id, reasoningContent) => {
   // 检查是否为直接传入的Gemini API响应格式
   if (data.modelVersion && !data.object) {
     console.log("Detected direct Gemini API response format in non-streaming mode, converting...");
     model = data.modelVersion || model;
   }
   
-  return JSON.stringify({
+  // 创建基本响应对象
+  const response = {
     id,
-    choices: data.candidates.map(transformCandidatesMessage),
+    choices: data.candidates.map(candidate => {
+      const choice = transformCandidatesMessage(candidate);
+      // 添加reasoning_content字段
+      if (reasoningContent) {
+        choice.message.reasoning_content = reasoningContent;
+      }
+      return choice;
+    }),
     created: Math.floor(Date.now() / 1000),
     model,
     //system_fingerprint: "fp_69829325d0",
     object: "chat.completion",
     usage: transformUsage(data.usageMetadata),
-  });
+  };
+  
+  return JSON.stringify(response);
 };
 
 const responseLineRE = /^data: (.*)(?:\n\n|\r\r|\r\n\r\n)/;
