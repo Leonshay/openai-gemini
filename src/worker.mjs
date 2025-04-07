@@ -914,6 +914,12 @@ const transformUsage = (data) => ({
 });
 
 const processCompletionsResponse = (data, model, id) => {
+  // 检查是否为直接传入的Gemini API响应格式
+  if (data.modelVersion && !data.object) {
+    console.log("Detected direct Gemini API response format in non-streaming mode, converting...");
+    model = data.modelVersion || model;
+  }
+  
   return JSON.stringify({
     id,
     choices: data.candidates.map(transformCandidatesMessage),
@@ -987,6 +993,26 @@ async function toOpenAiStream(chunk, controller) {
   let data;
   try {
     data = JSON.parse(line);
+    // 检查是否为直接传入的Gemini API响应格式
+    if (data.candidates && data.usageMetadata && data.modelVersion && !data.choices) {
+      // 这是一个直接的Gemini API响应，需要转换为我们期望的格式
+      console.log("Detected direct Gemini API response format, converting...");
+      return controller.enqueue("data: " + JSON.stringify({
+        id: this.id,
+        object: "chat.completion",
+        created: Math.floor(Date.now() / 1000),
+        model: data.modelVersion || this.model,
+        choices: data.candidates.map(cand => ({
+          index: cand.index || 0,
+          message: {
+            role: "assistant",
+            content: cand.content?.parts?.[0]?.text || ""
+          },
+          finish_reason: reasonsMap[cand.finishReason] || cand.finishReason
+        })),
+        usage: transformUsage(data.usageMetadata)
+      }) + delimiter);
+    }
   } catch (err) {
     console.error(line);
     console.error(err);
