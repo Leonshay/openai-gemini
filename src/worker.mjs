@@ -475,7 +475,7 @@ ${originalSystemPrompt}
 
 ---
 
-再次提示当用户有输出格式要求时（如精简，排版，字数等），不用在思考中执行，继续按照协议思考，因为本轮输出的内容仅有思考，输出格式要求仅生效于最终回复，但要在思考中考虑并提到格式要求，以便之后在最终回复中执行。
+再次提示当用户有输出格式要求时（如精简，排版，字数等），不用在思考中执行，继续按照协议思考，因为本轮输出的内容仅有思考，输出格式要求仅生效于最终回复，但要在思考中考虑并提到格式要求，以便之后给模型二在最终回复中执行格式要求。
 最后强调你的输出仅需且必须只表达你根据协议的**思考过程**以便之后给模型二组织回复，而不输出具体的最终回复。
 
 `
@@ -611,13 +611,15 @@ ${originalSystemPrompt}
 
 ${thinkingContent}
 
+---
+
 # original system prompt:
 
 ${originalSystemPrompt}
 
 ---
 
-请根据用户输入，参考思考过程，并确保绝对优先遵守original system prompt的指令，结合这三者以original system prompt的输出要求来组织撰写最终回复。`
+请根据用户输入，参考思考过程，并确保绝对优先遵守original system prompt的指令，结合这三者以original system prompt的输出要求来组织撰写最终回复，而不是回复思考过程。`
         },
         ...originalReq.messages.filter(m => m.role !== "system")
       ]
