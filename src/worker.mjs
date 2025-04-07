@@ -919,11 +919,9 @@ const processCompletionsResponse = (data, model, id, reasoningContent) => {
     choices: data.candidates.map(candidate => {
       const choice = transformCandidatesMessage(candidate);
       // 添加reasoning_content字段
-      // 确保即使在非流式模式下也始终包含reasoning_content字段
-      choice.message.reasoning_content = reasoningContent || "无思考内容";
-      console.log("response:reasoningContent", reasoningContent);      
-      console.log("response:choice.message.reasoning_content", choice.message.reasoning_content);
-      
+      if (reasoningContent) {
+        choice.message.reasoning_content = reasoningContent;
+      }
       return choice;
     }),
     created: Math.floor(Date.now() / 1000),
