@@ -158,7 +158,8 @@ async function handleCompletions(req, apiKey) {
   if (req.stream) {
     url += "?alt=sse";
   }
-
+  // 生成唯一ID
+  let id = generateChatcmplId();
 
   // 保存原始请求参数
   const originalReq = {...req, stream: req.stream};
@@ -539,7 +540,7 @@ ${originalSystemPrompt}
 
                     // 创建一个类似OpenAI格式的响应块，但content为null，reasoning_content包含思考内容
                     const openAIChunk = {
-                      id: generateChatcmplId(),
+                      id: id,
                       object: "chat.completion.chunk",
                       created: Math.floor(Date.now() / 1000),
                       model: model,
@@ -674,7 +675,7 @@ ${originalSystemPrompt}
               if (cand?.content?.parts?.[0]?.text) {
                 // 创建一个类似OpenAI格式的响应块，保留第一步的reasoning_content
                 const openAIChunk = {
-                  id: generateChatcmplId(),
+                  id: id,
                   object: "chat.completion.chunk",
                   created: Math.floor(Date.now() / 1000),
                   model: model,
@@ -709,8 +710,7 @@ ${originalSystemPrompt}
   if (!req.stream) {
     const response = await sendFinalRequest();
 
-    // 生成唯一ID
-    let id = generateChatcmplId();
+
     let body = "";
 
     if (response?.ok) {
