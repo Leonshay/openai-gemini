@@ -525,7 +525,9 @@ ${originalSystemPrompt}
       // 创建一个新的ReadableStream来发送给用户
       const userStream = new ReadableStream({
         last: [],
-        streamIncludeUsage: true,
+        streamIncludeUsage: req.stream,
+        model,
+        id,
         async start(controller) {
           const transform = transformThinkingResponseStream.bind(this);
           try {
@@ -566,7 +568,7 @@ ${originalSystemPrompt}
             thinkingContent = thinkingChunks.join("");
 
             // 第二步：发送最终请求
-            await sendFinalRequest(controller).bind(this);
+            await sendFinalRequest(this, controller);
 
           } catch (err) {
             console.error("Error in thinking stream processing:", err);
@@ -600,7 +602,7 @@ ${originalSystemPrompt}
   console.log("thinkingContent: ", thinkingContent)
 
   // 定义发送最终请求的函数
-  async function sendFinalRequest(controller = null) {
+  async function sendFinalRequest(info, controller = null) {
     // 第二步：发送最终请求
     const finalReq = {
       ...originalReq,
@@ -657,7 +659,7 @@ ${originalSystemPrompt}
             buffer: "",
           }))
           .getReader();
-        const transform = transformResponseStream.bind(this);
+        const transform = transformResponseStream.bind(info);
         // 读取并处理最终流
         while (true) {
           const {done, value} = await reader.read();
@@ -670,7 +672,7 @@ ${originalSystemPrompt}
             } catch (err) {
               console.error(value);
               console.error(err);
-              const length = this.last.length || 1; // at least 1 error msg
+              const length = info.last.length || 1; // at least 1 error msg
               const candidates = Array.from({ length }, (_, index) => ({
                 finishReason: "error",
                 content: { parts: [{ text: err }] },
@@ -681,16 +683,16 @@ ${originalSystemPrompt}
             const cand = data.candidates[0];
             console.assert(data.candidates.length === 1, "Unexpected candidates count: %d", data.candidates.length);
             cand.index = cand.index || 0; // absent in new -002 models response
-            if (!this.last[cand.index]) {
+            if (!info.last[cand.index]) {
               controller.enqueue(transform(data, false, "first"));
             }
-            this.last[cand.index] = data;
+            info.last[cand.index] = data;
             if (cand.content) { // prevent empty data (e.g. when MAX_TOKENS)
               controller.enqueue(transform(data));
             }
           }
         }
-        await toOpenAiStreamFlush(controller).bind(this);
+        await toOpenAiStreamFlush(info, controller);
 
         controller.close();
         // 已经在流中处理了响应，但需要返回带有CORS头的Response对象
@@ -1048,10 +1050,10 @@ async function toOpenAiStream(chunk, controller) {
   }
 }
 
-async function toOpenAiStreamFlush(controller) {
-  const transform = transformResponseStream.bind(this);
-  if (this.last.length > 0) {
-    for (const data of this.last) {
+async function toOpenAiStreamFlush(info, controller) {
+  const transform = transformResponseStream.bind(info);
+  if (info.last.length > 0) {
+    for (const data of info.last) {
       controller.enqueue(transform(data, "stop"));
     }
     controller.enqueue("data: [DONE]" + delimiter);
