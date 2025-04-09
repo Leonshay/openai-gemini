@@ -566,7 +566,7 @@ ${originalSystemPrompt}
             thinkingContent = thinkingChunks.join("");
 
             // 第二步：发送最终请求
-            await sendFinalRequest(this.last, this.streamIncludeUsage, controller);
+            await sendFinalRequest(controller).bind(this);
 
           } catch (err) {
             console.error("Error in thinking stream processing:", err);
@@ -600,9 +600,7 @@ ${originalSystemPrompt}
   console.log("thinkingContent: ", thinkingContent)
 
   // 定义发送最终请求的函数
-  async function sendFinalRequest(lastFromUp, streamIncludeUsageFromUp, controller = null) {
-    this.last = lastFromUp || [];
-    this.streamIncludeUsage = streamIncludeUsageFromUp || null;
+  async function sendFinalRequest(controller = null) {
     // 第二步：发送最终请求
     const finalReq = {
       ...originalReq,
@@ -672,7 +670,7 @@ ${originalSystemPrompt}
             } catch (err) {
               console.error(value);
               console.error(err);
-              const length = last.length || 1; // at least 1 error msg
+              const length = this.last.length || 1; // at least 1 error msg
               const candidates = Array.from({ length }, (_, index) => ({
                 finishReason: "error",
                 content: { parts: [{ text: err }] },
@@ -683,16 +681,16 @@ ${originalSystemPrompt}
             const cand = data.candidates[0];
             console.assert(data.candidates.length === 1, "Unexpected candidates count: %d", data.candidates.length);
             cand.index = cand.index || 0; // absent in new -002 models response
-            if (!last[cand.index]) {
+            if (!this.last[cand.index]) {
               controller.enqueue(transform(data, false, "first"));
             }
-            last[cand.index] = data;
+            this.last[cand.index] = data;
             if (cand.content) { // prevent empty data (e.g. when MAX_TOKENS)
               controller.enqueue(transform(data));
             }
           }
         }
-        await toOpenAiStreamFlush(controller);
+        await toOpenAiStreamFlush(controller).bind(this);
 
         controller.close();
         // 已经在流中处理了响应，但需要返回带有CORS头的Response对象
