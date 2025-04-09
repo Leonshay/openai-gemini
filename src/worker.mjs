@@ -140,6 +140,7 @@ async function handleEmbeddings(req, apiKey) {
 
 const DEFAULT_MODEL = "gemini-1.5-pro-latest";
 
+const thinkingChunks = [];
 
 async function handleCompletions(req, apiKey) {
   let model = DEFAULT_MODEL;
@@ -520,46 +521,42 @@ ${originalSystemPrompt}
 
       // 收集思考内容
       const reader = thinkingStream.getReader();
-      const thinkingChunks = [];
 
       // 创建一个新的ReadableStream来发送给用户
       const userStream = new ReadableStream({
+        last: [],
+        streamIncludeUsage: req.stream_options?.include_usage,
         async start(controller) {
+          const transform = transformThinkingResponseStream.bind(this);
           try {
             // 读取并处理思考流
             while (true) {
               const {done, value} = await reader.read();
               if (done) break;
-
+              let data;
               if (value) {
                 try {
-                  const data = JSON.parse(value);
-                  const cand = data.candidates?.[0];
-                  if (cand?.content?.parts?.[0]?.text) {
-                    thinkingChunks.push(cand.content.parts[0].text);
-
-                    // 创建一个类似OpenAI格式的响应块，但content为null，reasoning_content包含思考内容
-                    const openAIChunk = {
-                      id: id,
-                      object: "chat.completion.chunk",
-                      created: Math.floor(Date.now() / 1000),
-                      model: model,
-                      choices: [{
-                        index: 0,
-                        delta: {
-                          role: cand.index === 0 ? "assistant" : undefined,
-                          content: null,
-                          reasoning_content: cand.content.parts[0].text
-                        },
-                        finish_reason: null
-                      }]
-                    };
-
-                    // 发送给用户
-                    controller.enqueue("data: " + JSON.stringify(openAIChunk) + delimiter);
-                  }
+                  data = JSON.parse(value);
                 } catch (err) {
-                  console.error("Error parsing thinking stream:", err);
+                  console.error(value);
+                  console.error(err);
+                  const length = this.last.length || 1; // at least 1 error msg
+                  const candidates = Array.from({ length }, (_, index) => ({
+                    finishReason: "error",
+                    content: { parts: [{ text: err }] },
+                    index,
+                  }));
+                  data = { candidates };
+                }
+                const cand = data.candidates[0];
+                console.assert(data.candidates.length === 1, "Unexpected candidates count: %d", data.candidates.length);
+                cand.index = cand.index || 0; // absent in new -002 models response
+                if (!this.last[cand.index]) {
+                  controller.enqueue(transform(data, false, "first"));
+                }
+                this.last[cand.index] = data;
+                if (cand.content) { // prevent empty data (e.g. when MAX_TOKENS)
+                  controller.enqueue(transform(data));
                 }
               }
             }
@@ -568,11 +565,8 @@ ${originalSystemPrompt}
             thinkingContent = thinkingChunks.join("");
 
             // 第二步：发送最终请求
-            await sendFinalRequest(controller);
+            await sendFinalRequest(this.last, controller);
 
-            // 完成流
-            controller.enqueue("data: [DONE]" + delimiter);
-            controller.close();
           } catch (err) {
             console.error("Error in thinking stream processing:", err);
             controller.error(err);
@@ -592,7 +586,7 @@ ${originalSystemPrompt}
     });
 
     // 解析思考结果
-    let thinkingBody = thinkingResponse.body;
+    let thinkingBody;
     if (thinkingResponse.ok) {
       thinkingBody = await thinkingResponse.text();
       thinkingContent =
@@ -605,7 +599,7 @@ ${originalSystemPrompt}
   console.log("thinkingContent: ", thinkingContent)
 
   // 定义发送最终请求的函数
-  async function sendFinalRequest(controller = null) {
+  async function sendFinalRequest(last, controller = null) {
     // 第二步：发送最终请求
     const finalReq = {
       ...originalReq,
@@ -662,42 +656,43 @@ ${originalSystemPrompt}
             buffer: "",
           }))
           .getReader();
-
+        this.streamIncludeUsage = req.stream_options?.include_usage;
+        const transform = transformResponseStream.bind(this);
         // 读取并处理最终流
         while (true) {
           const {done, value} = await reader.read();
           if (done) break;
 
+          let data;
           if (value) {
             try {
-              const data = JSON.parse(value);
-              const cand = data.candidates?.[0];
-              if (cand?.content?.parts?.[0]?.text) {
-                // 创建一个类似OpenAI格式的响应块，保留第一步的reasoning_content
-                const openAIChunk = {
-                  id: id,
-                  object: "chat.completion.chunk",
-                  created: Math.floor(Date.now() / 1000),
-                  model: model,
-                  choices: [{
-                    index: 0,
-                    delta: {
-                      role: cand.index === 0 ? "assistant" : undefined,
-                      content: cand.content.parts[0].text
-                    },
-                    finish_reason: cand.finishReason ? reasonsMap[cand.finishReason] || cand.finishReason : null
-                  }]
-                };
-
-                // 发送给用户
-                controller.enqueue("data: " + JSON.stringify(openAIChunk) + delimiter);
-              }
+              data = JSON.parse(value);
             } catch (err) {
-              console.error("Error parsing final stream:", err);
+              console.error(value);
+              console.error(err);
+              const length = last.length || 1; // at least 1 error msg
+              const candidates = Array.from({ length }, (_, index) => ({
+                finishReason: "error",
+                content: { parts: [{ text: err }] },
+                index,
+              }));
+              data = { candidates };
+            }
+            const cand = data.candidates[0];
+            console.assert(data.candidates.length === 1, "Unexpected candidates count: %d", data.candidates.length);
+            cand.index = cand.index || 0; // absent in new -002 models response
+            if (!last[cand.index]) {
+              controller.enqueue(transform(data, false, "first"));
+            }
+            last[cand.index] = data;
+            if (cand.content) { // prevent empty data (e.g. when MAX_TOKENS)
+              controller.enqueue(transform(data));
             }
           }
         }
+        await toOpenAiStreamFlush(controller);
 
+        controller.close();
         // 已经在流中处理了响应，但需要返回带有CORS头的Response对象
         return new Response(null, fixCors(response));
       }
@@ -910,8 +905,18 @@ const transformCandidates = (key, cand) => ({
   logprobs: null,
   finish_reason: reasonsMap[cand.finishReason] || cand.finishReason,
 });
+const transformThinkingCandidates = (key, cand) => ({
+  index: cand.index || 0, // 0-index is absent in new -002 models response
+  [key]: {
+    role: "assistant",
+    reasoning_content: cand.content?.parts.map(p => p.text).join(SEP),
+  },
+  logprobs: null,
+  finish_reason: reasonsMap[cand.finishReason] || cand.finishReason,
+});
 const transformCandidatesMessage = transformCandidates.bind(null, "message");
 const transformCandidatesDelta = transformCandidates.bind(null, "delta");
+const transformThinkingCandidatesDelta = transformThinkingCandidates.bind(null, "delta");
 
 const transformUsage = (data) => ({
   completion_tokens: data.candidatesTokenCount,
@@ -958,6 +963,33 @@ async function parseStreamFlush(controller) {
 
 function transformResponseStream(data, stop, first) {
   const item = transformCandidatesDelta(data.candidates[0]);
+  if (stop) {
+    item.delta = {};
+  } else {
+    item.finish_reason = null;
+  }
+  if (first) {
+    item.delta.content = "";
+  } else {
+    delete item.delta.role;
+  }
+  const output = {
+    id: this.id,
+    choices: [item],
+    created: Math.floor(Date.now() / 1000),
+    model: this.model,
+    //system_fingerprint: "fp_69829325d0",
+    object: "chat.completion.chunk",
+  };
+  if (data.usageMetadata && this.streamIncludeUsage) {
+    output.usage = stop ? transformUsage(data.usageMetadata) : null;
+  }
+  return "data: " + JSON.stringify(output) + delimiter;
+}
+
+function transformThinkingResponseStream(data, stop, first) {
+  const item = transformThinkingCandidatesDelta(data.candidates[0]);
+  thinkingChunks.push(item.content.parts[0].text);
   if (stop) {
     item.delta = {};
   } else {
