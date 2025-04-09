@@ -525,7 +525,7 @@ ${originalSystemPrompt}
       // 创建一个新的ReadableStream来发送给用户
       const userStream = new ReadableStream({
         last: [],
-        streamIncludeUsage: req.stream_options?.include_usage,
+        streamIncludeUsage: true,
         async start(controller) {
           const transform = transformThinkingResponseStream.bind(this);
           try {
@@ -601,8 +601,8 @@ ${originalSystemPrompt}
 
   // 定义发送最终请求的函数
   async function sendFinalRequest(lastFromUp, streamIncludeUsageFromUp, controller = null) {
-    this.last = lastFromUp;
-    this.streamIncludeUsage = streamIncludeUsageFromUp;
+    this.last = lastFromUp || [];
+    this.streamIncludeUsage = streamIncludeUsageFromUp || null;
     // 第二步：发送最终请求
     const finalReq = {
       ...originalReq,
