@@ -600,7 +600,8 @@ ${originalSystemPrompt}
   console.log("thinkingContent: ", thinkingContent)
 
   // 定义发送最终请求的函数
-  async function sendFinalRequest(last, streamIncludeUsageFromUp, controller = null) {
+  async function sendFinalRequest(lastFromUp, streamIncludeUsageFromUp, controller = null) {
+    this.last = lastFromUp;
     this.streamIncludeUsage = streamIncludeUsageFromUp;
     // 第二步：发送最终请求
     const finalReq = {
