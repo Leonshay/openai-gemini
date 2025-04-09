@@ -639,7 +639,7 @@ ${originalSystemPrompt}
         ...originalReq.messages.filter(m => m.role !== "system")
       ]
     };
-    // console.log(finalReq.messages[0].content)
+    console.log(finalReq.messages[0].content)
     const response = await fetch(url, {
       method: "POST",
       headers: makeHeaders(apiKey, {"Content-Type": "application/json"}),
@@ -989,8 +989,7 @@ function transformResponseStream(data, stop, first) {
 
 function transformThinkingResponseStream(data, stop, first) {
   const item = transformThinkingCandidatesDelta(data.candidates[0]);
-  console.log("data", data)
-  if (item?.reasoning_content?.parts?.[0]?.text) {thinkingChunks.push(item.reasoning_content.parts[0].text);}
+  if (item?.content?.parts?.[0]?.text) {thinkingChunks.push(item.content.parts[0].text);}
   if (stop) {
     item.delta = {};
   } else {
