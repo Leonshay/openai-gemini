@@ -537,6 +537,7 @@ ${originalSystemPrompt}
               if (value) {
                 try {
                   data = JSON.parse(value);
+                  console.log("data",data);
                 } catch (err) {
                   console.error(value);
                   console.error(err);
