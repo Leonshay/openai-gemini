@@ -566,7 +566,7 @@ ${originalSystemPrompt}
             thinkingContent = thinkingChunks.join("");
 
             // 第二步：发送最终请求
-            await sendFinalRequest(this.last, controller);
+            await sendFinalRequest(this.last, this.streamIncludeUsage, controller);
 
           } catch (err) {
             console.error("Error in thinking stream processing:", err);
@@ -600,7 +600,8 @@ ${originalSystemPrompt}
   console.log("thinkingContent: ", thinkingContent)
 
   // 定义发送最终请求的函数
-  async function sendFinalRequest(last, controller = null) {
+  async function sendFinalRequest(last, streamIncludeUsageFromUp, controller = null) {
+    this.streamIncludeUsage = streamIncludeUsageFromUp;
     // 第二步：发送最终请求
     const finalReq = {
       ...originalReq,
@@ -657,7 +658,6 @@ ${originalSystemPrompt}
             buffer: "",
           }))
           .getReader();
-        this.streamIncludeUsage = req.stream_options?.include_usage;
         const transform = transformResponseStream.bind(this);
         // 读取并处理最终流
         while (true) {
