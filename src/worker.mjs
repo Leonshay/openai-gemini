@@ -989,6 +989,8 @@ function transformResponseStream(data, stop, first) {
 
 function transformThinkingResponseStream(data, stop, first) {
   const item = transformThinkingCandidatesDelta(data.candidates[0]);
+  console.log("item.content.parts: ",item.content.parts)
+  console.log("item.content.parts[0].text: ",item.content.parts[0].text)
   if (item?.content?.parts?.[0]?.text) {thinkingChunks.push(item.content.parts[0].text);}
   if (stop) {
     item.delta = {};
