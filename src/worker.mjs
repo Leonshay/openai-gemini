@@ -501,12 +501,15 @@ ${originalSystemPrompt}
     url += "?alt=sse";
   }
 
+  console.log("thinking request body:", thinkingReqBody)
 
   thinkingResponse = await fetch(url, {
     method: "POST",
     headers: makeHeaders(apiKey, {"Content-Type": "application/json"}),
     body: JSON.stringify(thinkingReqBody)
   });
+
+  console.log("thinking response body:", thinkingResponse.body)
 
   let returnResponseBody = thinkingResponse.body;
   let returnResponse = thinkingResponse;
@@ -616,7 +619,9 @@ ${originalSystemPrompt}
     }
   }
   // 返回处理后的流
-  return new Response(returnResponseBody, fixCors(returnResponse || {status: 500}));
+  let response = new Response(returnResponseBody, fixCors(returnResponse || {status: 500}));
+  console.log("returnResponseBody: ", response.body)
+  return response;
 
   // 定义发送最终请求的函数
   async function sendFinalRequest(info, controller) {
@@ -667,12 +672,16 @@ ${originalSystemPrompt}
         finalReqBody.tools = finalReqBody.tools || [];
         finalReqBody.tools.push({googleSearch: {}});
     }
-    // console.log(finalReq.messages[0].content)
+
+    console.log("final request body: ", finalReqBody)
+
     returnResponse = await fetch(url, {
       method: "POST",
       headers: makeHeaders(apiKey, {"Content-Type": "application/json"}),
       body: JSON.stringify(finalReqBody), // try
     });
+
+    console.log("final response body: ", returnResponse.body)
 
     returnResponseBody = returnResponse.body;
     if (returnResponse.ok) {
@@ -1086,12 +1095,14 @@ function parseStreamFlush(controller) {
 
 function transformResponseStream(data, special) {
   const item = transformCandidatesDelta(data.candidates[0]);
+  let isStop = false;
   switch (special) {
     case "stop":
       if (item.delta.tool_calls) {
         item.finish_reason = "tool_calls";
       }
       item.delta = {};
+      isStop = true;
       break;
     case "first":
       item.finish_reason = null;
@@ -1111,7 +1122,7 @@ function transformResponseStream(data, special) {
     object: "chat.completion.chunk",
   };
   if (data.usageMetadata && this.streamIncludeUsage) {
-    output.usage = stop ? transformUsage(data.usageMetadata) : null;
+    output.usage = isStop ? transformUsage(data.usageMetadata) : null;
   }
   return "data: " + JSON.stringify(output) + delimiter;
 }
@@ -1121,12 +1132,14 @@ function transformThinkingResponseStream(data, special) {
   if (data.candidates[0]?.content?.parts?.[0]?.text) {
     thinkingChunks.push(data.candidates[0].content.parts[0].text);
   }
+  let isStop = false;
   switch (special) {
     case "stop":
       if (item.delta.tool_calls) {
         item.finish_reason = "tool_calls";
       }
       item.delta = {};
+      isStop = true;
       break;
     case "first":
       item.finish_reason = null;
@@ -1146,7 +1159,7 @@ function transformThinkingResponseStream(data, special) {
     object: "chat.completion.chunk",
   };
   if (data.usageMetadata && this.streamIncludeUsage) {
-    output.usage = stop ? transformUsage(data.usageMetadata) : null;
+    output.usage = isStop ? transformUsage(data.usageMetadata) : null;
   }
   return "data: " + JSON.stringify(output) + delimiter;
 }
