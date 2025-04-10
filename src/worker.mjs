@@ -579,9 +579,12 @@ ${originalSystemPrompt}
             // 第二步：发送最终请求
             returnResponse = await sendFinalRequest(this, controller);
 
+            controller.close();
+
           } catch (err) {
             console.error("Error in thinking stream processing:", err);
             controller.error(err);
+            await reader.cancel();
           }
         }
       });
@@ -729,7 +732,6 @@ ${originalSystemPrompt}
           }
         }
         toOpenAiStreamFlush(info, controller);
-        controller.close();
       }
     }
     return new Response(returnResponseBody, fixCors(returnResponse || {status: 500}));
