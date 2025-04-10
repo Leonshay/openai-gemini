@@ -401,7 +401,7 @@ ${thinkingContent}
         })
       ]
     };
-    console.log("final request: ", finalReq)
+    // console.log("final request: ", finalReq)
     let finalReqBody = await transformRequest(finalReq);
     switch (true) {
       case model.endsWith(":search"):
@@ -688,7 +688,7 @@ const transformMessages = async (messages) => {
           parts: await transformMsg(item, fnames)
         });
       // }
-      console.log("content", contents.toString())
+      console.log("content", contents)
     }
   }
   if (system_instruction && contents.length === 0) {
