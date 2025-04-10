@@ -143,6 +143,7 @@ const DEFAULT_MODEL = "gemini-2.0-flash";
 const thinkingChunks = [];
 
 async function handleCompletions(req, apiKey) {
+  thinkingChunks.length = 0;
   let model = DEFAULT_MODEL;
   switch (true) {
     case typeof req.model !== "string":
@@ -199,16 +200,18 @@ async function handleCompletions(req, apiKey) {
       // 筛选出用户消息并在最后一条前插入新提示
       ...req.messages.filter(m => m.role !== "system").flatMap((msg, index, arr) => {
         if (msg.role === 'user' && index === arr.length - 1) {
-          return [{
-            role: "system",
+          return {
+            role: "user",
             content: `
 # Thinking protocol
 1. 确认用户意图。2. 探索不同解决方法。3. 输出：我的思考完毕
-# original system prompt:
+# Original system prompt:
 ${originalSystemPrompt}
-遵守Thinking protocol，回顾original system prompt，最后强调你的输出仅需且必须只表达你根据协议的**思考过程**以便引导之后组织回复，而不输出或组织具体的最终回复。
+遵守Thinking protocol，回顾Original system prompt，最后强调你的输出仅需且必须只表达你根据协议的**思考过程**以便引导之后组织回复，而不输出或组织具体的最终回复。
+# User Content:
+${lastUserContent}
             `
-          }, msg];
+          };
         }
         return msg;
       })
@@ -371,19 +374,22 @@ ${originalSystemPrompt}
         // 筛选出用户消息并在最后一条前插入新提示
         ...req.messages.filter(m => m.role !== "system").flatMap((msg, index, arr) => {
           if (msg.role === 'user' && index === arr.length - 1) {
-            return [{
-              role: "system",
+            return {
+              role: "user",
               content: `
 ---
-# 根据用户输入，产生的思考过程：
+# User Content:
+${lastUserContent}
+---
+# Thinking process:
 ${thinkingContent}
 ---
 # original system prompt:
 ${originalSystemPrompt}
 ---
-现在请根据用户输入，参考思考过程，回顾original system prompt，并确保绝对优先遵守original system prompt的指令，结合这三者以original system prompt的输出要求来组织撰写最终回复，而不是回复思考过程或复述思考过程。
+现在请根据User Content，参考Thinking process，回顾original system prompt，并确保绝对优先遵守original system prompt的指令，结合这三者以original system prompt的输出要求来组织撰写最终回复，而不是回复思考过程或复述思考过程。
 `
-            }, msg];
+            };
           }
           return msg;
         })
