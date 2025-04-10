@@ -372,15 +372,15 @@ ${lastUserContent}
 
   // 定义发送最终请求的函数
   async function sendFinalRequest(info, controller) {
-    const {tools, ...orgReq} =orgReq;
+    const {tools, ...orgReqWithoutTools} =orgReq;
     // 第二步：发送最终请求
     const finalReq = {
-      ...orgReq,
+      ...orgReqWithoutTools,
       messages: [
         // 保留原始系统提示
-        ...orgReq.messages.filter(m => m.role === "system"),
+        ...orgReqWithoutTools.messages.filter(m => m.role === "system"),
         // 筛选出用户消息并在最后一条前插入新提示
-        ...orgReq.messages.filter(m => m.role !== "system").flatMap((msg, index, arr) => {
+        ...orgReqWithoutTools.messages.filter(m => m.role !== "system").flatMap((msg, index, arr) => {
           if (msg.role === 'user' && index === arr.length - 1) {
             return {
               role: "user",
@@ -408,7 +408,7 @@ ${thinkingContent}
       case model.endsWith(":search"):
         model = model.substring(0, model.length - 7);
       // eslint-disable-next-line no-fallthrough
-      case orgReq.model.endsWith("-search-preview"):
+      case orgReqWithoutTools.model.endsWith("-search-preview"):
         finalReqBody.tools = finalReqBody.tools || [];
         finalReqBody.tools.push({googleSearch: {}});
     }
@@ -426,7 +426,7 @@ ${thinkingContent}
     returnResponseBody = returnResponse.body;
     if (returnResponse.ok) {
       // 如果是流式请求且有controller（来自第一步的流处理）
-      if (orgReq.stream && controller) {
+      if (orgReqWithoutTools.stream && controller) {
         const returnResponseStreamReader = returnResponse.body
           .pipeThrough(new TextDecoderStream())
           .pipeThrough(new TransformStream({
