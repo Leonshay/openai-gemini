@@ -155,25 +155,8 @@ async function handleCompletions(req, apiKey) {
     case req.model.startsWith("learnlm-"):
       model = req.model;
   }
-  let body = await transformRequest(req);
-  switch (true) {
-    case model.endsWith(":search"):
-      model = model.substring(0, model.length - 7);
-      // eslint-disable-next-line no-fallthrough
-    case req.model.endsWith("-search-preview"):
-      body.tools = body.tools || [];
-      body.tools.push({googleSearch: {}});
-  }
-  const TASK = req.stream ? "streamGenerateContent" : "generateContent";
-  let url = `${BASE_URL}/${API_VERSION}/models/${model}:${TASK}`;
-  if (req.stream) {
-    url += "?alt=sse";
-  }
-  // 生成唯一ID
-  let id = generateChatcmplId();
 
   // 保存原始请求参数
-  const originalReq = {...req, stream: req.stream};
   let originalSystemPrompt = "";
   const systemMessage = req.messages?.find(m => m.role === "system");
   if (systemMessage) {
@@ -189,13 +172,12 @@ async function handleCompletions(req, apiKey) {
   }
   originalSystemPrompt = originalSystemPrompt || "系统提示词为空";
 
-  console.log("originalReq:", originalReq)
+  console.log("originalReq:", req)
   // console.log("originalSystemPrompt:", originalSystemPrompt)
 
   // 第一步：发送思考请求
   const thinkingReq = {
     ...req,
-    stream: req.stream, // 保持与原始请求相同的stream设置
     messages: [
       {
         role: "system",
@@ -503,21 +485,37 @@ ${originalSystemPrompt}
   let thinkingContent = "无";
   let thinkingResponse;
 
+  let thinkingReqBody = await transformRequest(thinkingReq);
+  switch (true) {
+    case model.endsWith(":search"):
+      model = model.substring(0, model.length - 7);
+    // eslint-disable-next-line no-fallthrough
+    case req.model.endsWith("-search-preview"):
+      thinkingReqBody.tools = thinkingReqBody.tools || [];
+      thinkingReqBody.tools.push({googleSearch: {}});
+  }
+
+  const TASK = req.stream ? "streamGenerateContent" : "generateContent";
+  let url = `${BASE_URL}/${API_VERSION}/models/${model}:${TASK}`;
   if (req.stream) {
-    // 流式思考请求处理
-    const TASK = "streamGenerateContent";
-    let thinkingUrl = `${BASE_URL}/${API_VERSION}/models/${model}:${TASK}?alt=sse`;
-
-    thinkingResponse = await fetch(thinkingUrl, {
-      method: "POST",
-      headers: makeHeaders(apiKey, {"Content-Type": "application/json"}),
-      body: JSON.stringify(await transformRequest(thinkingReq))
-    });
-
-    // console.log("stream_thinking_request: ", thinkingReq);
+    url += "?alt=sse";
+  }
 
 
-    if (thinkingResponse.ok) {
+  thinkingResponse = await fetch(url, {
+    method: "POST",
+    headers: makeHeaders(apiKey, {"Content-Type": "application/json"}),
+    body: JSON.stringify(thinkingReqBody)
+  });
+
+  let returnResponseBody = thinkingResponse.body;
+  let returnResponse = thinkingResponse;
+
+  if (thinkingResponse.ok) {
+    // 生成唯一ID
+    let id = generateChatcmplId();
+
+    if (req.stream) {
       // 创建一个TransformStream来处理思考流
       const thinkingStream = thinkingResponse.body
         .pipeThrough(new TextDecoderStream())
@@ -547,23 +545,22 @@ ${originalSystemPrompt}
               if (value) {
                 try {
                   data = JSON.parse(value);
-                  // console.log("data",data);
                 } catch (err) {
                   console.error(value);
                   console.error(err);
                   const length = this.last.length || 1; // at least 1 error msg
-                  const candidates = Array.from({ length }, (_, index) => ({
+                  const candidates = Array.from({length}, (_, index) => ({
                     finishReason: "error",
-                    content: { parts: [{ text: err }] },
+                    content: {parts: [{text: err}]},
                     index,
                   }));
-                  data = { candidates };
+                  data = {candidates};
                 }
                 const cand = data.candidates[0];
                 console.assert(data.candidates.length === 1, "Unexpected candidates count: %d", data.candidates.length);
                 cand.index = cand.index || 0; // absent in new -002 models response
                 if (!this.last[cand.index]) {
-                  controller.enqueue(transform(data, false, "first"));
+                  controller.enqueue(transform(data, "first"));
                 }
                 this.last[cand.index] = data;
                 if (cand.content) { // prevent empty data (e.g. when MAX_TOKENS)
@@ -575,8 +572,9 @@ ${originalSystemPrompt}
             // 合并所有思考内容
             thinkingContent = thinkingChunks.join("");
 
+            console.log("thinkingContent: ", thinkingContent)
             // 第二步：发送最终请求
-            await sendFinalRequest(this, controller);
+            returnResponse = await sendFinalRequest(this, controller);
 
           } catch (err) {
             console.error("Error in thinking stream processing:", err);
@@ -584,36 +582,47 @@ ${originalSystemPrompt}
           }
         }
       });
-
-      // 返回处理后的流
-      return new Response(userStream.pipeThrough(new TextEncoderStream()), fixCors(thinkingResponse));
-    }
-  } else {
-    // 非流式思考请求处理
-    thinkingResponse = await fetch(`${BASE_URL}/${API_VERSION}/models/${model}:generateContent`, {
-      method: "POST",
-      headers: makeHeaders(apiKey, {"Content-Type": "application/json"}),
-      body: JSON.stringify(await transformRequest(thinkingReq))
-    });
-
-    // 解析思考结果
-    let thinkingBody;
-    if (thinkingResponse.ok) {
-      thinkingBody = await thinkingResponse.text();
+      returnResponseBody = userStream.pipeThrough(new TextEncoderStream());
+    } else {
+      // 解析思考结果
+      let thinkingBody = thinkingResponse.text();
       thinkingContent =
         JSON.parse(JSON.stringify({
           choices: JSON.parse(thinkingBody).candidates.map(transformCandidatesMessage),
         })).choices[0]?.message?.content;
+
+      console.log("thinkingContent: ", thinkingContent)
+
+      returnResponse = await sendFinalRequest(null, null);
+
+      if (returnResponse?.ok) {
+        returnResponseBody = await returnResponse.text();
+        returnResponseBody = processCompletionsResponse(
+          JSON.parse(returnResponseBody),
+          model,
+          id,
+        );
+        // 解析处理后的 JSON 对象
+        let parsedBody = JSON.parse(returnResponseBody);
+
+        // 在每个 message 中添加 reasoning_content 字段
+        parsedBody.choices.forEach(choice => {
+          choice.message.reasoning_content = thinkingContent;
+        });
+        // 将修改后的对象重新转换为 JSON 字符串
+        returnResponseBody = JSON.stringify(parsedBody);
+      }
+
     }
   }
-
-  console.log("thinkingContent: ", thinkingContent)
+  // 返回处理后的流
+  return new Response(returnResponseBody, fixCors(returnResponse || {status: 500}));
 
   // 定义发送最终请求的函数
-  async function sendFinalRequest(info, controller = null) {
+  async function sendFinalRequest(info, controller) {
     // 第二步：发送最终请求
     const finalReq = {
-      ...originalReq,
+      ...req,
       messages: [
         {
           role: "system",
@@ -646,20 +655,30 @@ ${originalSystemPrompt}
 
 模型一的任务是思考，你的任务是回复用户，现在请根据用户输入，参考模型一的思考过程，并确保绝对优先遵守original system prompt的指令，结合这三者以original system prompt的输出要求来组织撰写最终回复，而不是回复思考过程或复述思考过程。`
         },
-        ...originalReq.messages.filter(m => m.role !== "system")
+        ...req.messages.filter(m => m.role !== "system")
       ]
     };
-    console.log(finalReq.messages[0].content)
-    const response = await fetch(url, {
+    let finalReqBody = await transformRequest(finalReq);
+    switch (true) {
+      case model.endsWith(":search"):
+        model = model.substring(0, model.length - 7);
+      // eslint-disable-next-line no-fallthrough
+      case req.model.endsWith("-search-preview"):
+        finalReqBody.tools = finalReqBody.tools || [];
+        finalReqBody.tools.push({googleSearch: {}});
+    }
+    // console.log(finalReq.messages[0].content)
+    returnResponse = await fetch(url, {
       method: "POST",
       headers: makeHeaders(apiKey, {"Content-Type": "application/json"}),
-      body: JSON.stringify(await transformRequest(finalReq)), // try
+      body: JSON.stringify(finalReqBody), // try
     });
 
-    // 如果是流式请求且有controller（来自第一步的流处理）
-    if (req.stream && controller) {
-      if (response.ok) {
-        const reader = response.body
+    returnResponseBody = returnResponse.body;
+    if (returnResponse.ok) {
+      // 如果是流式请求且有controller（来自第一步的流处理）
+      if (req.stream && controller) {
+        const returnResponseStreamReader = returnResponse.body
           .pipeThrough(new TextDecoderStream())
           .pipeThrough(new TransformStream({
             transform: parseStream,
@@ -670,7 +689,7 @@ ${originalSystemPrompt}
         const transform = transformResponseStream.bind(info);
         // 读取并处理最终流
         while (true) {
-          const {done, value} = await reader.read();
+          const {done, value} = await returnResponseStreamReader.read();
           if (done) break;
 
           let data;
@@ -681,18 +700,18 @@ ${originalSystemPrompt}
               console.error(value);
               console.error(err);
               const length = info.last.length || 1; // at least 1 error msg
-              const candidates = Array.from({ length }, (_, index) => ({
+              const candidates = Array.from({length}, (_, index) => ({
                 finishReason: "error",
-                content: { parts: [{ text: err }] },
+                content: {parts: [{text: err}]},
                 index,
               }));
-              data = { candidates };
+              data = {candidates};
             }
             const cand = data.candidates[0];
             console.assert(data.candidates.length === 1, "Unexpected candidates count: %d", data.candidates.length);
             cand.index = cand.index || 0; // absent in new -002 models response
             if (!info.last[cand.index]) {
-              controller.enqueue(transform(data, false, "first"));
+              controller.enqueue(transform(data, "first"));
             }
             info.last[cand.index] = data;
             if (cand.content) { // prevent empty data (e.g. when MAX_TOKENS)
@@ -700,47 +719,12 @@ ${originalSystemPrompt}
             }
           }
         }
-        await toOpenAiStreamFlush(info, controller);
-
+        toOpenAiStreamFlush(info, controller);
         controller.close();
-        // 已经在流中处理了响应，但需要返回带有CORS头的Response对象
-        return new Response(null, fixCors(response));
       }
     }
-
-    return response; // 返回响应供非流式处理使用
+    return new Response(returnResponseBody, fixCors(returnResponse || {status: 500}));
   }
-
-  // 如果不是流式请求，直接发送最终请求
-  if (!req.stream) {
-    const response = await sendFinalRequest();
-
-
-    let body = "";
-
-    if (response?.ok) {
-      body = await response.text();
-      body = processCompletionsResponse(
-        JSON.parse(body),
-        model,
-        id,
-      );
-      // 解析处理后的 JSON 对象
-      let parsedBody = JSON.parse(body);
-
-      // 在每个 message 中添加 reasoning_content 字段
-      parsedBody.choices.forEach(choice => {
-        choice.message.reasoning_content = thinkingContent;
-      });
-      // 将修改后的对象重新转换为 JSON 字符串
-      body = JSON.stringify(parsedBody);
-    }
-
-    return new Response(body, fixCors(response || {status: 500}));
-  }
-
-  // 流式请求已在前面处理并返回，如果代码执行到这里，说明出现了错误
-  return new Response("Error processing request", fixCors({status: 500, statusText: "Internal Server Error"}));
 }
 
 const adjustProps = (schemaPart) => {
@@ -844,7 +828,7 @@ const parseImg = async (url) => {
   };
 };
 
-const transformMsg = async ({ content, tool_calls, tool_call_id }, fnames) => {
+const transformMsg = async ({content, tool_calls, tool_call_id}, fnames) => {
   const parts = [];
   if (tool_call_id !== undefined) {
     let response;
@@ -855,7 +839,7 @@ const transformMsg = async ({ content, tool_calls, tool_call_id }, fnames) => {
       throw new HttpError("Invalid function response: " + content, 400);
     }
     if (typeof response !== "object" || response === null || Array.isArray(response)) {
-      response = { result: response };
+      response = {result: response};
     }
     parts.push({
       functionResponse: {
@@ -871,7 +855,7 @@ const transformMsg = async ({ content, tool_calls, tool_call_id }, fnames) => {
       if (tcall.type !== "function") {
         throw new HttpError(`Unsupported tool_call type: "${tcall.type}"`, 400);
       }
-      const { function: { arguments: argstr, name }, id } = tcall;
+      const {function: {arguments: argstr, name}, id} = tcall;
       let args;
       try {
         args = JSON.parse(argstr);
@@ -893,7 +877,7 @@ const transformMsg = async ({ content, tool_calls, tool_call_id }, fnames) => {
   if (!Array.isArray(content)) {
     // system, user: string
     // assistant: string or null (Required unless tool_calls is specified.)
-    parts.push({ text: content });
+    parts.push({text: content});
     return parts;
   }
   // user:
@@ -935,7 +919,7 @@ const transformMessages = async (messages) => {
   const fnames = {}; // cache function names by tool_call_id between messages
   for (const item of messages) {
     if (item.role === "system") {
-      system_instruction = { parts: await transformMsg(item) };
+      system_instruction = {parts: await transformMsg(item)};
     } else {
       if (item.role === "assistant") {
         item.role = "model";
@@ -947,7 +931,7 @@ const transformMessages = async (messages) => {
         }
         item.role = "function"; // ignored
       } else if (item.role !== "user") {
-        throw HttpError(`Unknown message role: "${item.role}"`, 400);
+        throw new HttpError(`Unknown message role: "${item.role}"`, 400);
       }
       contents.push({
         role: item.role,
@@ -967,10 +951,10 @@ const transformTools = (req) => {
   if (req.tools) {
     const funcs = req.tools.filter(tool => tool.type === "function");
     funcs.forEach(adjustSchema);
-    tools = [{ function_declarations: funcs.map(schema => schema.function) }];
+    tools = [{function_declarations: funcs.map(schema => schema.function)}];
   }
   if (req.tool_choice) {
-    const allowed_function_names = req.tool_choice?.type === "function" ? [ req.tool_choice?.function?.name ] : undefined;
+    const allowed_function_names = req.tool_choice?.type === "function" ? [req.tool_choice?.function?.name] : undefined;
     if (allowed_function_names || typeof req.tool_choice === "string") {
       tool_config = {
         function_calling_config: {
@@ -980,7 +964,7 @@ const transformTools = (req) => {
       };
     }
   }
-  return { tools, tool_config };
+  return {tools, tool_config};
 };
 
 const transformRequest = async (req) => ({
@@ -1006,7 +990,7 @@ const reasonsMap = { //https://ai.google.dev/api/rest/v1/GenerateContentResponse
 };
 const SEP = "\n\n|>";
 const transformCandidates = (key, cand) => {
-  const message = { role: "assistant", content: [] };
+  const message = {role: "assistant", content: []};
   for (const part of cand.content?.parts ?? []) {
     if (part.functionCall) {
       const fc = part.functionCall;
@@ -1032,7 +1016,7 @@ const transformCandidates = (key, cand) => {
   };
 };
 const transformThinkingCandidates = (key, cand) => {
-  const message = { role: "assistant", reasoning_content: [] };
+  const message = {role: "assistant", reasoning_content: []};
   for (const part of cand.content?.parts ?? []) {
     if (part.functionCall) {
       const fc = part.functionCall;
@@ -1080,7 +1064,8 @@ const processCompletionsResponse = (data, model, id) => {
 };
 
 const responseLineRE = /^data: (.*)(?:\n\n|\r\r|\r\n\r\n)/;
-function parseStream (chunk, controller) {
+
+function parseStream(chunk, controller) {
   this.buffer += chunk;
   do {
     const match = this.buffer.match(responseLineRE);
@@ -1092,14 +1077,14 @@ function parseStream (chunk, controller) {
   } while (true); // eslint-disable-line no-constant-condition
 }
 
- function parseStreamFlush(controller) {
+function parseStreamFlush(controller) {
   if (this.buffer) {
     console.error("Invalid data:", this.buffer);
     controller.enqueue(this.buffer);
   }
 }
 
-function transformResponseStream (data, special) {
+function transformResponseStream(data, special) {
   const item = transformCandidatesDelta(data.candidates[0]);
   switch (special) {
     case "stop":
@@ -1131,7 +1116,7 @@ function transformResponseStream (data, special) {
   return "data: " + JSON.stringify(output) + delimiter;
 }
 
-function transformThinkingResponseStream (data, special) {
+function transformThinkingResponseStream(data, special) {
   const item = transformThinkingCandidatesDelta(data.candidates[0]);
   if (data.candidates[0]?.content?.parts?.[0]?.text) {
     thinkingChunks.push(data.candidates[0].content.parts[0].text);
@@ -1167,7 +1152,8 @@ function transformThinkingResponseStream (data, special) {
 }
 
 const delimiter = "\n\n";
-function toOpenAiStream (line, controller) {
+
+function toOpenAiStream(line, controller) {
   const transform = transformResponseStream.bind(this);
   let data;
   try {
@@ -1194,10 +1180,11 @@ function toOpenAiStream (line, controller) {
     controller.enqueue(transform(data));
   }
 }
-function toOpenAiStreamFlush (controller) {
-  const transform = transformResponseStream.bind(this);
-  if (this.last.length > 0) {
-    for (const data of this.last) {
+
+function toOpenAiStreamFlush(info, controller) {
+  const transform = transformResponseStream.bind(info);
+  if (info.last.length > 0) {
+    for (const data of info.last) {
       controller.enqueue(transform(data, "stop"));
     }
     controller.enqueue("data: [DONE]" + delimiter);
