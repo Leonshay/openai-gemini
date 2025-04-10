@@ -399,7 +399,8 @@ ${thinkingContent}
           }
           return msg;
         })
-      ]
+      ],
+      tools: []
     };
     // console.log("final request: ", finalReq)
     let finalReqBody = await transformRequest(finalReq);
