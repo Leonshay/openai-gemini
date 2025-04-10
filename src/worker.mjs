@@ -688,7 +688,7 @@ const transformMessages = async (messages) => {
           parts: await transformMsg(item, fnames)
         });
       // }
-      console.log("content", contents)
+      // console.log("content", contents)
     }
   }
   if (system_instruction && contents.length === 0) {
@@ -755,6 +755,7 @@ const transformCandidates = (key, cand) => {
           arguments: JSON.stringify(fc.args),
         }
       });
+      console.log("Function call pt:", fc)
     } else {
       message.content.push(part.text);
     }
@@ -781,6 +782,7 @@ const transformThinkingCandidates = (key, cand) => {
           arguments: JSON.stringify(fc.args),
         }
       });
+      console.log("Function call:", fc)
     } else {
       message.reasoning_content.push(part.text);
     }
