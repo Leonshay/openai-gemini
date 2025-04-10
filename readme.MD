@@ -111,13 +111,21 @@ OPENAI_API_BASE="https://my-super-proxy.vercel.app/v1"
 
 ## Models
 
-Requests use the specified [model] if its name starts with "gemini-", "learnlm-", 
+Requests use the specified [model] if its name starts with "gemini-", "gemma-", "learnlm-", 
 or "models/". Otherwise, these defaults apply:
 
-- `chat/completions`: `gemini-1.5-pro-latest`
+- `chat/completions`: `gemini-2.0-flash`
 - `embeddings`: `text-embedding-004`
 
 [model]: https://ai.google.dev/gemini-api/docs/models/gemini
+
+
+## Built-in tools
+
+To use the **web search** tool, append ":search" to the model name
+(e.g., "gemini-2.0-flash:search").
+
+Note: The `annotations` message property is not implemented.
 
 
 ## Media
@@ -135,8 +143,7 @@ Implemented via [`inlineData`](https://ai.google.dev/api/caching#Part).
 
 - [x] `chat/completions`
 
-  Currently, most of the parameters that are applicable to both APIs have been implemented,
-  with the exception of function calls.
+  Currently, most of the parameters that are applicable to both APIs have been implemented.
   <details>
 
   - [x] `messages`
@@ -145,9 +152,9 @@ Implemented via [`inlineData`](https://ai.google.dev/api/caching#Part).
           - [x] "system" (=>`system_instruction`)
           - [x] "user"
           - [x] "assistant"
-          - [ ] "tool" (v1beta)
+          - [x] "tool"
       - [ ] `name`
-      - [ ] `tool_calls`
+      - [x] `tool_calls`
   - [x] `model`
   - [x] `frequency_penalty`
   - [ ] `logit_bias`
@@ -167,9 +174,9 @@ Implemented via [`inlineData`](https://ai.google.dev/api/caching#Part).
       - [x] `include_usage`
   - [x] `temperature` (0.0..2.0 for OpenAI, but Gemini supports up to infinity)
   - [x] `top_p`
-  - [ ] `tools` (v1beta)
-  - [ ] `tool_choice` (v1beta)
-  - [ ] `parallel_tool_calls`
+  - [x] `tools`
+  - [x] `tool_choice`
+  - [ ] `parallel_tool_calls` (is always active in Gemini)
 
   </details>
 - [ ] `completions`
