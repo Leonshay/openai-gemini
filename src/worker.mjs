@@ -194,7 +194,7 @@ async function handleCompletions(req, apiKey) {
   // console.log("originalSystemPrompt:", originalSystemPrompt)
 
   // 第一步：发送思考请求
-  const thinkingReq = {
+  const thinkingReq = JSON.parse(JSON.stringify({
     ...req,
     messages: [
       // 保留原始系统提示
@@ -520,7 +520,9 @@ ${lastUserContent}
         return msg;
       })
     ]
-  };
+  }));
+
+  req = JSON.parse(JSON.stringify(thinkingReq));
 
   // 根据是否为流式请求选择不同的处理方式
   let thinkingContent = "无";
@@ -669,7 +671,7 @@ ${lastUserContent}
 
   // 定义发送最终请求的函数
   async function sendFinalRequest(info, controller) {
-    const {tools, ...orgReqWithoutTools} =orgReq;
+    const {tools, ...orgReqWithoutTools} = orgReq;
     // 第二步：发送最终请求
     const finalReq = {
       ...orgReqWithoutTools,
@@ -992,10 +994,10 @@ const transformMessages = async (messages) => {
         throw new HttpError(`Unknown message role: "${item.role}"`, 400);
       }
       // if (count++ % 2 !== 0) {
-        contents.push({
-          role: item.role,
-          parts: await transformMsg(item, fnames)
-        });
+      contents.push({
+        role: item.role,
+        parts: await transformMsg(item, fnames)
+      });
       // }
       // console.log("content", contents)
     }
@@ -1042,7 +1044,7 @@ const generateChatcmplId = () => {
 };
 
 const reasonsMap = { //https://ai.google.dev/api/rest/v1/GenerateContentResponse#finishreason
-  //"FINISH_REASON_UNSPECIFIED": // Default value. This value is unused.
+                     //"FINISH_REASON_UNSPECIFIED": // Default value. This value is unused.
   "STOP": "stop",
   "MAX_TOKENS": "length",
   "SAFETY": "content_filter",
