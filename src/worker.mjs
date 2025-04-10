@@ -663,13 +663,14 @@ const transformMessages = async (messages) => {
     return;
   }
   const contents = [];
+  // let count = 0;
   let system_instruction;
   const fnames = {}; // cache function names by tool_call_id between messages
   for (const item of messages) {
     if (item.role === "system") {
       system_instruction = {parts: await transformMsg(item)};
     } else {
-      if (item.role === "assistant"|| item.role === "model") {
+      if (item.role === "assistant") {
         item.role = "model";
       } else if (item.role === "tool") {
         const prev = contents[contents.length - 1];
@@ -678,13 +679,16 @@ const transformMessages = async (messages) => {
           continue;
         }
         item.role = "function"; // ignored
-      } else if (item.role !== "user" && item.role !== "function") {
+      } else if (item.role !== "user") {
         throw new HttpError(`Unknown message role: "${item.role}"`, 400);
       }
-      contents.push({
-        role: item.role,
-        parts: await transformMsg(item, fnames)
-      });
+      // if (count++ % 2 !== 0) {
+        contents.push({
+          role: item.role,
+          parts: await transformMsg(item, fnames)
+        });
+      // }
+      console.log("content", contents.toString())
     }
   }
   if (system_instruction && contents.length === 0) {
@@ -729,7 +733,7 @@ const generateChatcmplId = () => {
 };
 
 const reasonsMap = { //https://ai.google.dev/api/rest/v1/GenerateContentResponse#finishreason
-                     //"FINISH_REASON_UNSPECIFIED": // Default value. This value is unused.
+  //"FINISH_REASON_UNSPECIFIED": // Default value. This value is unused.
   "STOP": "stop",
   "MAX_TOKENS": "length",
   "SAFETY": "content_filter",
