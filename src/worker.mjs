@@ -395,7 +395,6 @@ ${originalSystemPrompt}
         })
       ]
     };
-    console.log("final request: ", finalReq)
     let finalReqBody = await transformRequest(finalReq);
     switch (true) {
       case model.endsWith(":search"):
@@ -663,7 +662,7 @@ const transformMessages = async (messages) => {
     if (item.role === "system") {
       system_instruction = {parts: await transformMsg(item)};
     } else {
-      if (item.role === "assistant") {
+      if (item.role === "assistant"|| item.role === "model") {
         item.role = "model";
       } else if (item.role === "tool") {
         const prev = contents[contents.length - 1];
