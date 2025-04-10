@@ -157,7 +157,7 @@ async function handleCompletions(req, apiKey) {
       model = req.model;
   }
 
-  let orgReq = {...req};
+  let orgReq = JSON.parse(JSON.stringify(req));
 
   // 保存原始请求参数
   let originalSystemPrompt = "系统提示词为空";
