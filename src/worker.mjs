@@ -200,8 +200,8 @@ async function handleCompletions(req, apiKey) {
       // 保留原始系统提示
       ...req.messages.filter(m => m.role === "system"),
       // 筛选出用户消息并在最后一条前插入新提示
-      ...req.messages.filter(m => m.role !== "system").flatMap((msg, index, arr) => {
-        if (msg.role === 'user' && index === arr.length - 1) {
+      ...req.messages.filter(m => m.role === "user").flatMap((msg, index, arr) => {
+        if (index === arr.length - 1) {
           return {
             role: "user",
             content: `
@@ -524,6 +524,7 @@ ${lastUserContent}
 
   req = JSON.parse(JSON.stringify(thinkingReq));
 
+
   // 根据是否为流式请求选择不同的处理方式
   let thinkingContent = "无";
   let thinkingResponse;
@@ -679,8 +680,8 @@ ${lastUserContent}
         // 保留原始系统提示
         ...orgReqWithoutTools.messages.filter(m => m.role === "system"),
         // 筛选出用户消息并在最后一条前插入新提示
-        ...orgReqWithoutTools.messages.filter(m => m.role !== "system").flatMap((msg, index, arr) => {
-          if (msg.role === 'user' && index === arr.length - 1) {
+        ...orgReqWithoutTools.messages.filter(m => m.role === "user").flatMap((msg, index, arr) => {
+          if (index === arr.length - 1) {
             return {
               role: "user",
               content: `
