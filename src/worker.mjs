@@ -372,6 +372,7 @@ ${lastUserContent}
 
   // 定义发送最终请求的函数
   async function sendFinalRequest(info, controller) {
+    const {tools, ...orgReq} =orgReq;
     // 第二步：发送最终请求
     const finalReq = {
       ...orgReq,
@@ -399,8 +400,7 @@ ${thinkingContent}
           }
           return msg;
         })
-      ],
-      tools: []
+      ]
     };
     // console.log("final request: ", finalReq)
     let finalReqBody = await transformRequest(finalReq);
