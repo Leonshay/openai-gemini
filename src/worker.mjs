@@ -395,6 +395,7 @@ ${originalSystemPrompt}
         })
       ]
     };
+    console.log("final request: ", finalReq)
     let finalReqBody = await transformRequest(finalReq);
     switch (true) {
       case model.endsWith(":search"):
