@@ -732,6 +732,7 @@ ${originalSystemPrompt}
           }
         }
         toOpenAiStreamFlush(info, controller);
+        return returnResponse;
       }
     }
     return new Response(returnResponseBody, fixCors(returnResponse || {status: 500}));
