@@ -982,7 +982,7 @@ const transformMessages = async (messages) => {
           continue;
         }
         item.role = "function"; // ignored
-      } else if (item.role !== "user") {
+      } else if (item.role !== "user" && item.role !== "function") {
         throw new HttpError(`Unknown message role: "${item.role}"`, 400);
       }
       contents.push({
