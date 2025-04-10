@@ -157,6 +157,8 @@ async function handleCompletions(req, apiKey) {
       model = req.model;
   }
 
+  let orgReq = {...req};
+
   // 保存原始请求参数
   let originalSystemPrompt = "系统提示词为空";
   const systemMessage = req.messages?.find(m => m.role === "system");
@@ -372,12 +374,12 @@ ${lastUserContent}
   async function sendFinalRequest(info, controller) {
     // 第二步：发送最终请求
     const finalReq = {
-      ...req,
+      ...orgReq,
       messages: [
         // 保留原始系统提示
-        ...req.messages.filter(m => m.role === "system"),
+        ...orgReq.messages.filter(m => m.role === "system"),
         // 筛选出用户消息并在最后一条前插入新提示
-        ...req.messages.filter(m => m.role !== "system").flatMap((msg, index, arr) => {
+        ...orgReq.messages.filter(m => m.role !== "system").flatMap((msg, index, arr) => {
           if (msg.role === 'user' && index === arr.length - 1) {
             return {
               role: "user",
@@ -405,7 +407,7 @@ ${thinkingContent}
       case model.endsWith(":search"):
         model = model.substring(0, model.length - 7);
       // eslint-disable-next-line no-fallthrough
-      case req.model.endsWith("-search-preview"):
+      case orgReq.model.endsWith("-search-preview"):
         finalReqBody.tools = finalReqBody.tools || [];
         finalReqBody.tools.push({googleSearch: {}});
     }
@@ -423,7 +425,7 @@ ${thinkingContent}
     returnResponseBody = returnResponse.body;
     if (returnResponse.ok) {
       // 如果是流式请求且有controller（来自第一步的流处理）
-      if (req.stream && controller) {
+      if (orgReq.stream && controller) {
         const returnResponseStreamReader = returnResponse.body
           .pipeThrough(new TextDecoderStream())
           .pipeThrough(new TransformStream({
