@@ -509,7 +509,7 @@ ${originalSystemPrompt}
     body: JSON.stringify(thinkingReqBody)
   });
 
-  console.log("thinking response body:", thinkingResponse.body)
+  console.log("thinking response body:", thinkingResponse.text())
 
   let returnResponseBody = thinkingResponse.body;
   let returnResponse = thinkingResponse;
@@ -575,7 +575,7 @@ ${originalSystemPrompt}
             // 合并所有思考内容
             thinkingContent = thinkingChunks.join("");
 
-            console.log("thinkingContent: ", thinkingContent)
+            // console.log("thinkingContent: ", thinkingContent)
             // 第二步：发送最终请求
             returnResponse = await sendFinalRequest(this, controller);
 
@@ -594,7 +594,7 @@ ${originalSystemPrompt}
       let thinkingBody = thinkingResponse.text();
       thinkingContent =
         JSON.parse(JSON.stringify({
-          choices: JSON.parse(thinkingBody).candidates.map(transformCandidatesMessage),
+          choices: JSON.parse(await thinkingBody).candidates.map(transformCandidatesMessage),
         })).choices[0]?.message?.content;
 
       console.log("thinkingContent: ", thinkingContent)
@@ -623,7 +623,7 @@ ${originalSystemPrompt}
   }
   // 返回处理后的流
   let response = new Response(returnResponseBody, fixCors(returnResponse || {status: 500}));
-  console.log("returnResponseBody: ", response.body)
+  console.log("returnResponseBody: ", response.text())
   return response;
 
   // 定义发送最终请求的函数
@@ -684,7 +684,7 @@ ${originalSystemPrompt}
       body: JSON.stringify(finalReqBody), // try
     });
 
-    console.log("final response body: ", returnResponse.body)
+    console.log("final response body: ", returnResponse.text())
 
     returnResponseBody = returnResponse.body;
     if (returnResponse.ok) {
