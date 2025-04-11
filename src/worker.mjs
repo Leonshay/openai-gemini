@@ -1,4 +1,4 @@
-import { Buffer } from "node:buffer";
+import {Buffer} from "node:buffer";
 
 export default {
   async fetch (request) {
@@ -583,37 +583,13 @@ ${lastUserContent}
         model,
         id,
         async start(controller) {
-          const transform = transformThinkingResponseStream.bind(this);
           try {
             // 读取并处理思考流
             while (true) {
               const {done, value} = await reader.read();
               if (done) break;
-              let data;
               if (value) {
-                try {
-                  data = JSON.parse(value);
-                } catch (err) {
-                  console.error(value);
-                  console.error(err);
-                  const length = this.last.length || 1; // at least 1 error msg
-                  const candidates = Array.from({length}, (_, index) => ({
-                    finishReason: "error",
-                    content: {parts: [{text: err}]},
-                    index,
-                  }));
-                  data = {candidates};
-                }
-                const cand = data.candidates[0];
-                console.assert(data.candidates.length === 1, "Unexpected candidates count: %d", data.candidates.length);
-                cand.index = cand.index || 0; // absent in new -002 models response
-                if (!this.last[cand.index]) {
-                  controller.enqueue(transform(data, "first"));
-                }
-                this.last[cand.index] = data;
-                if (cand.content) { // prevent empty data (e.g. when MAX_TOKENS)
-                  controller.enqueue(transform(data));
-                }
+                toOpenAiStream(value, controller,true);
               }
             }
 
@@ -655,7 +631,7 @@ ${lastUserContent}
           }
         } catch (err) {
           console.error("Error parsing response:", err);
-          return new Response(body, fixCors(response)); // output as is
+          return new Response(returnResponseBody, fixCors(returnResponse)); // output as is
         }
         returnResponseBody = processCompletionsResponse(returnResponseBody, model, id);
 
@@ -673,9 +649,8 @@ ${lastUserContent}
     }
   }
   // 返回处理后的流
-  let response = new Response(returnResponseBody, fixCors(returnResponse || {status: 500}));
   // console.log("returnResponseBody: ", response.text())
-  return response;
+  return new Response(returnResponseBody, fixCors(returnResponse || {status: 500}));
 
   // 定义发送最终请求的函数
   async function sendFinalRequest(info, controller) {
@@ -753,37 +728,12 @@ ${thinkingContent}
             buffer: "",
           }))
           .getReader();
-        const transform = transformResponseStream.bind(info);
         // 读取并处理最终流
         while (true) {
           const {done, value} = await returnResponseStreamReader.read();
           if (done) break;
-
-          let data;
           if (value) {
-            try {
-              data = JSON.parse(value);
-            } catch (err) {
-              console.error(value);
-              console.error(err);
-              const length = info.last.length || 1; // at least 1 error msg
-              const candidates = Array.from({length}, (_, index) => ({
-                finishReason: "error",
-                content: {parts: [{text: err}]},
-                index,
-              }));
-              data = {candidates};
-            }
-            const cand = data.candidates[0];
-            console.assert(data.candidates.length === 1, "Unexpected candidates count: %d", data.candidates.length);
-            cand.index = cand.index || 0; // absent in new -002 models response
-            if (!info.last[cand.index]) {
-              controller.enqueue(transform(data, "first"));
-            }
-            info.last[cand.index] = data;
-            if (cand.content) { // prevent empty data (e.g. when MAX_TOKENS)
-              controller.enqueue(transform(data));
-            }
+            toOpenAiStream(value, controller,false)
           }
         }
         toOpenAiStreamFlush(info, controller);
@@ -999,7 +949,7 @@ const transformMessages = async (messages) => {
         }
         item.role = "function"; // ignored
       } else if (item.role !== "user") {
-        throw HttpError(`Unknown message role: "${item.role}"`, 400);
+        throw new HttpError(`Unknown message role: "${item.role}"`, 400);
       }
       contents.push({
         role: item.role,
@@ -1184,7 +1134,7 @@ const sseline = (obj) => {
   obj.created = Math.floor(Date.now()/1000);
   return "data: " + JSON.stringify(obj) + delimiter;
 };
-function toOpenAiStream (line, controller) {
+function toOpenAiStream (line, controller, isThinking) {
   let data;
   try {
     data = JSON.parse(line);
@@ -1196,9 +1146,12 @@ function toOpenAiStream (line, controller) {
     controller.enqueue(line); // output as is
     return;
   }
+  if (isThinking && data.candidates[0]?.content?.parts?.[0]?.text) {
+    thinkingChunks.push(data.candidates[0].content.parts[0].text);
+  }
   const obj = {
     id: this.id,
-    choices: data.candidates.map(transformCandidatesDelta),
+    choices: isThinking? data.candidates.map(transformThinkingCandidatesDelta) :data.candidates.map(transformCandidatesDelta),
     //created: Math.floor(Date.now()/1000),
     model: data.modelVersion ?? this.model,
     //system_fingerprint: "fp_69829325d0",
