@@ -1168,13 +1168,20 @@ function toOpenAiStream (info, line, controller, isThinking) {
   const finish_reason = cand.finish_reason;
   cand.finish_reason = null;
   if (!info.last[cand.index]) { // first
-    controller.enqueue(sseline({
-      ...obj,
-      choices: [{ ...cand, tool_calls: undefined, delta: { role: "assistant", content: "" } }],
-    }));
+    if (isThinking) {
+      controller.enqueue(sseline({
+        ...obj,
+        choices: [{...cand, tool_calls: undefined, delta: {role: "assistant", reasoning_content: ""}}],
+      }));
+    } else {
+      controller.enqueue(sseline({
+        ...obj,
+        choices: [{...cand, tool_calls: undefined, delta: {role: "assistant", content: ""}}],
+      }));
+    }
   }
   delete cand.delta.role;
-  if ("content" in cand.delta) { // prevent empty data (e.g. when MAX_TOKENS)
+  if ("content" in cand.delta || "reasoning_content" in cand.delta) { // prevent empty data (e.g. when MAX_TOKENS)
     controller.enqueue(sseline(obj));
   }
   cand.finish_reason = finish_reason;
