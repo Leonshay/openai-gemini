@@ -589,7 +589,7 @@ ${lastUserContent}
               const {done, value} = await reader.read();
               if (done) break;
               if (value) {
-                toOpenAiStream(value, controller,true);
+                toOpenAiStream(this, value, controller,true);
               }
             }
 
@@ -733,7 +733,7 @@ ${thinkingContent}
           const {done, value} = await returnResponseStreamReader.read();
           if (done) break;
           if (value) {
-            toOpenAiStream(value, controller,false)
+            toOpenAiStream(info, value, controller,false)
           }
         }
         toOpenAiStreamFlush(info, controller);
@@ -1134,7 +1134,7 @@ const sseline = (obj) => {
   obj.created = Math.floor(Date.now()/1000);
   return "data: " + JSON.stringify(obj) + delimiter;
 };
-function toOpenAiStream (line, controller, isThinking) {
+function toOpenAiStream (info, line, controller, isThinking) {
   let data;
   try {
     data = JSON.parse(line);
@@ -1150,13 +1150,13 @@ function toOpenAiStream (line, controller, isThinking) {
     thinkingChunks.push(data.candidates[0].content.parts[0].text);
   }
   const obj = {
-    id: this.id,
+    id: info.id,
     choices: isThinking? data.candidates.map(transformThinkingCandidatesDelta) :data.candidates.map(transformCandidatesDelta),
     //created: Math.floor(Date.now()/1000),
-    model: data.modelVersion ?? this.model,
+    model: data.modelVersion ?? info.model,
     //system_fingerprint: "fp_69829325d0",
     object: "chat.completion.chunk",
-    usage: data.usageMetadata && this.streamIncludeUsage ? null : undefined,
+    usage: data.usageMetadata && info.streamIncludeUsage ? null : undefined,
   };
   if (checkPromptBlock(obj.choices, data.promptFeedback, "delta")) {
     controller.enqueue(sseline(obj));
@@ -1167,7 +1167,7 @@ function toOpenAiStream (line, controller, isThinking) {
   cand.index = cand.index || 0; // absent in new -002 models response
   const finish_reason = cand.finish_reason;
   cand.finish_reason = null;
-  if (!this.last[cand.index]) { // first
+  if (!info.last[cand.index]) { // first
     controller.enqueue(sseline({
       ...obj,
       choices: [{ ...cand, tool_calls: undefined, delta: { role: "assistant", content: "" } }],
@@ -1178,11 +1178,11 @@ function toOpenAiStream (line, controller, isThinking) {
     controller.enqueue(sseline(obj));
   }
   cand.finish_reason = finish_reason;
-  if (data.usageMetadata && this.streamIncludeUsage) {
+  if (data.usageMetadata && info.streamIncludeUsage) {
     obj.usage = transformUsage(data.usageMetadata);
   }
   cand.delta = {};
-  this.last[cand.index] = obj;
+  info.last[cand.index] = obj;
 }
 function toOpenAiStreamFlush(info, controller) {
   if (info.last.length > 0) {
