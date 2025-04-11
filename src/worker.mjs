@@ -1,13 +1,13 @@
-import {Buffer} from "node:buffer";
+import { Buffer } from "node:buffer";
 
 export default {
-  async fetch(request) {
+  async fetch (request) {
     if (request.method === "OPTIONS") {
       return handleOPTIONS();
     }
     const errHandler = (err) => {
       console.error(err);
-      return new Response(err.message, fixCors({status: err.status ?? 500}));
+      return new Response(err.message, fixCors({ status: err.status ?? 500 }));
     };
     try {
       const auth = request.headers.get("Authorization");
@@ -17,7 +17,7 @@ export default {
           throw new HttpError("The specified HTTP method is not allowed for the requested resource", 400);
         }
       };
-      const {pathname} = new URL(request.url);
+      const { pathname } = new URL(request.url);
       switch (true) {
         case pathname.endsWith("/chat/completions"):
           assert(request.method === "POST");
@@ -48,10 +48,10 @@ class HttpError extends Error {
   }
 }
 
-const fixCors = ({headers, status, statusText}) => {
+const fixCors = ({ headers, status, statusText }) => {
   headers = new Headers(headers);
   headers.set("Access-Control-Allow-Origin", "*");
-  return {headers, status, statusText};
+  return { headers, status, statusText };
 };
 
 const handleOPTIONS = async () => {
@@ -71,20 +71,20 @@ const API_VERSION = "v1beta";
 const API_CLIENT = "genai-js/0.21.0"; // npm view @google/generative-ai version
 const makeHeaders = (apiKey, more) => ({
   "x-goog-api-client": API_CLIENT,
-  ...(apiKey && {"x-goog-api-key": apiKey}),
+  ...(apiKey && { "x-goog-api-key": apiKey }),
   ...more
 });
 
-async function handleModels(apiKey) {
+async function handleModels (apiKey) {
   const response = await fetch(`${BASE_URL}/${API_VERSION}/models`, {
     headers: makeHeaders(apiKey),
   });
-  let {body} = response;
+  let { body } = response;
   if (response.ok) {
-    const {models} = JSON.parse(await response.text());
+    const { models } = JSON.parse(await response.text());
     body = JSON.stringify({
       object: "list",
-      data: models.map(({name}) => ({
+      data: models.map(({ name }) => ({
         id: name.replace("models/", ""),
         object: "model",
         created: 0,
@@ -101,33 +101,35 @@ async function handleEmbeddings(req, apiKey) {
   if (typeof req.model !== "string") {
     throw new HttpError("model is not specified", 400);
   }
-  if (!Array.isArray(req.input)) {
-    req.input = [req.input];
-  }
   let model;
   if (req.model.startsWith("models/")) {
     model = req.model;
   } else {
-    req.model = DEFAULT_EMBEDDINGS_MODEL;
+    if (!req.model.startsWith("gemini-")) {
+      req.model = DEFAULT_EMBEDDINGS_MODEL;
+    }
     model = "models/" + req.model;
+  }
+  if (!Array.isArray(req.input)) {
+    req.input = [ req.input ];
   }
   const response = await fetch(`${BASE_URL}/${API_VERSION}/${model}:batchEmbedContents`, {
     method: "POST",
-    headers: makeHeaders(apiKey, {"Content-Type": "application/json"}),
+    headers: makeHeaders(apiKey, { "Content-Type": "application/json" }),
     body: JSON.stringify({
       "requests": req.input.map(text => ({
         model,
-        content: {parts: {text}},
+        content: { parts: { text } },
         outputDimensionality: req.dimensions,
       }))
     })
   });
-  let {body} = response;
+  let { body } = response;
   if (response.ok) {
-    const {embeddings} = JSON.parse(await response.text());
+    const { embeddings } = JSON.parse(await response.text());
     body = JSON.stringify({
       object: "list",
-      data: embeddings.map(({values}, index) => ({
+      data: embeddings.map(({ values }, index) => ({
         object: "embedding",
         index,
         embedding: values,
@@ -646,11 +648,17 @@ ${lastUserContent}
 
       if (returnResponse?.ok) {
         returnResponseBody = await returnResponse.text();
-        returnResponseBody = processCompletionsResponse(
-          JSON.parse(returnResponseBody),
-          model,
-          id,
-        );
+        try {
+          returnResponseBody = JSON.parse(returnResponseBody);
+          if (!returnResponseBody.candidates) {
+            throw new Error("Invalid completion object");
+          }
+        } catch (err) {
+          console.error("Error parsing response:", err);
+          return new Response(body, fixCors(response)); // output as is
+        }
+        returnResponseBody = processCompletionsResponse(returnResponseBody, model, id);
+
         // 解析处理后的 JSON 对象
         let parsedBody = JSON.parse(returnResponseBody);
 
@@ -991,15 +999,12 @@ const transformMessages = async (messages) => {
         }
         item.role = "function"; // ignored
       } else if (item.role !== "user") {
-        throw new HttpError(`Unknown message role: "${item.role}"`, 400);
+        throw HttpError(`Unknown message role: "${item.role}"`, 400);
       }
-      // if (count++ % 2 !== 0) {
       contents.push({
         role: item.role,
         parts: await transformMsg(item, fnames)
       });
-      // }
-      // console.log("content", contents)
     }
   }
   if (system_instruction && contents.length === 0) {
@@ -1044,7 +1049,7 @@ const generateChatcmplId = () => {
 };
 
 const reasonsMap = { //https://ai.google.dev/api/rest/v1/GenerateContentResponse#finishreason
-                     //"FINISH_REASON_UNSPECIFIED": // Default value. This value is unused.
+  //"FINISH_REASON_UNSPECIFIED": // Default value. This value is unused.
   "STOP": "stop",
   "MAX_TOKENS": "length",
   "SAFETY": "content_filter",
@@ -1076,9 +1081,11 @@ const transformCandidates = (key, cand) => {
     index: cand.index || 0, // 0-index is absent in new -002 models response
     [key]: message,
     logprobs: null,
-    finish_reason: reasonsMap[cand.finishReason] || cand.finishReason,
+    finish_reason: message.tool_calls ? "tool_calls" : reasonsMap[cand.finishReason] || cand.finishReason,
+    //original_finish_reason: cand.finishReason,
   };
 };
+
 const transformThinkingCandidates = (key, cand) => {
   const message = {role: "assistant", reasoning_content: []};
   for (const part of cand.content?.parts ?? []) {
@@ -1103,7 +1110,8 @@ const transformThinkingCandidates = (key, cand) => {
     index: cand.index || 0, // 0-index is absent in new -002 models response
     [key]: message,
     logprobs: null,
-    finish_reason: reasonsMap[cand.finishReason] || cand.finishReason,
+    finish_reason: message.tool_calls ? "tool_calls" : reasonsMap[cand.finishReason] || cand.finishReason,
+    //original_finish_reason: cand.finishReason,
   };
 };
 const transformCandidatesMessage = transformCandidates.bind(null, "message");
@@ -1116,21 +1124,43 @@ const transformUsage = (data) => ({
   total_tokens: data.totalTokenCount
 });
 
+const checkPromptBlock = (choices, promptFeedback, key) => {
+  if (choices.length) { return; }
+  if (promptFeedback?.blockReason) {
+    console.log("Prompt block reason:", promptFeedback.blockReason);
+    if (promptFeedback.blockReason === "SAFETY") {
+      promptFeedback.safetyRatings
+        .filter(r => r.blocked)
+        .forEach(r => console.log(r));
+    }
+    choices.push({
+      index: 0,
+      [key]: null,
+      finish_reason: "content_filter",
+      //original_finish_reason: data.promptFeedback.blockReason,
+    });
+  }
+  return true;
+};
+
 const processCompletionsResponse = (data, model, id) => {
-  return JSON.stringify({
+  const obj = {
     id,
     choices: data.candidates.map(transformCandidatesMessage),
-    created: Math.floor(Date.now() / 1000),
-    model,
+    created: Math.floor(Date.now()/1000),
+    model: data.modelVersion ?? model,
     //system_fingerprint: "fp_69829325d0",
     object: "chat.completion",
-    usage: transformUsage(data.usageMetadata),
-  });
+    usage: data.usageMetadata && transformUsage(data.usageMetadata),
+  };
+  if (obj.choices.length === 0 ) {
+    checkPromptBlock(obj.choices, data.promptFeedback, "message");
+  }
+  return JSON.stringify(obj);
 };
 
 const responseLineRE = /^data: (.*)(?:\n\n|\r\r|\r\n\r\n)/;
-
-function parseStream(chunk, controller) {
+function parseStream (chunk, controller) {
   this.buffer += chunk;
   do {
     const match = this.buffer.match(responseLineRE);
@@ -1149,112 +1179,62 @@ function parseStreamFlush(controller) {
   }
 }
 
-function transformResponseStream(data, special) {
-  const item = transformCandidatesDelta(data.candidates[0]);
-  let isStop = false;
-  switch (special) {
-    case "stop":
-      if (item.delta.tool_calls) {
-        item.finish_reason = "tool_calls";
-      }
-      item.delta = {};
-      isStop = true;
-      break;
-    case "first":
-      item.finish_reason = null;
-      item.delta.content = "";
-      delete item.delta.tool_calls;
-      break;
-    default:
-      item.finish_reason = null;
-      delete item.delta.role;
-  }
-  const output = {
-    id: this.id,
-    choices: [item],
-    created: Math.floor(Date.now() / 1000),
-    model: this.model,
-    //system_fingerprint: "fp_69829325d0",
-    object: "chat.completion.chunk",
-  };
-  if (data.usageMetadata && this.streamIncludeUsage) {
-    output.usage = isStop ? transformUsage(data.usageMetadata) : null;
-  }
-  return "data: " + JSON.stringify(output) + delimiter;
-}
-
-function transformThinkingResponseStream(data, special) {
-  const item = transformThinkingCandidatesDelta(data.candidates[0]);
-  if (data.candidates[0]?.content?.parts?.[0]?.text) {
-    thinkingChunks.push(data.candidates[0].content.parts[0].text);
-  }
-  let isStop = false;
-  switch (special) {
-    case "stop":
-      if (item.delta.tool_calls) {
-        item.finish_reason = "tool_calls";
-      }
-      item.delta = {};
-      isStop = true;
-      break;
-    case "first":
-      item.finish_reason = null;
-      item.delta.content = "";
-      delete item.delta.tool_calls;
-      break;
-    default:
-      item.finish_reason = null;
-      delete item.delta.role;
-  }
-  const output = {
-    id: this.id,
-    choices: [item],
-    created: Math.floor(Date.now() / 1000),
-    model: this.model,
-    //system_fingerprint: "fp_69829325d0",
-    object: "chat.completion.chunk",
-  };
-  if (data.usageMetadata && this.streamIncludeUsage) {
-    output.usage = isStop ? transformUsage(data.usageMetadata) : null;
-  }
-  return "data: " + JSON.stringify(output) + delimiter;
-}
-
 const delimiter = "\n\n";
-
-function toOpenAiStream(line, controller) {
-  const transform = transformResponseStream.bind(this);
+const sseline = (obj) => {
+  obj.created = Math.floor(Date.now()/1000);
+  return "data: " + JSON.stringify(obj) + delimiter;
+};
+function toOpenAiStream (line, controller) {
   let data;
   try {
     data = JSON.parse(line);
+    if (!data.candidates) {
+      throw new Error("Invalid completion chunk object");
+    }
   } catch (err) {
-    console.error(line);
-    console.error(err);
-    const length = this.last.length || 1; // at least 1 error msg
-    const candidates = Array.from({length}, (_, index) => ({
-      finishReason: "error",
-      content: {parts: [{text: err}]},
-      index,
-    }));
-    data = {candidates};
+    console.error("Error parsing response:", err);
+    controller.enqueue(line); // output as is
+    return;
   }
-  const cand = data.candidates[0];
+  const obj = {
+    id: this.id,
+    choices: data.candidates.map(transformCandidatesDelta),
+    //created: Math.floor(Date.now()/1000),
+    model: data.modelVersion ?? this.model,
+    //system_fingerprint: "fp_69829325d0",
+    object: "chat.completion.chunk",
+    usage: data.usageMetadata && this.streamIncludeUsage ? null : undefined,
+  };
+  if (checkPromptBlock(obj.choices, data.promptFeedback, "delta")) {
+    controller.enqueue(sseline(obj));
+    return;
+  }
   console.assert(data.candidates.length === 1, "Unexpected candidates count: %d", data.candidates.length);
+  const cand = obj.choices[0];
   cand.index = cand.index || 0; // absent in new -002 models response
-  if (!this.last[cand.index]) {
-    controller.enqueue(transform(data, "first"));
+  const finish_reason = cand.finish_reason;
+  cand.finish_reason = null;
+  if (!this.last[cand.index]) { // first
+    controller.enqueue(sseline({
+      ...obj,
+      choices: [{ ...cand, tool_calls: undefined, delta: { role: "assistant", content: "" } }],
+    }));
   }
-  this.last[cand.index] = data;
-  if (cand.content) { // prevent empty data (e.g. when MAX_TOKENS)
-    controller.enqueue(transform(data));
+  delete cand.delta.role;
+  if ("content" in cand.delta) { // prevent empty data (e.g. when MAX_TOKENS)
+    controller.enqueue(sseline(obj));
   }
+  cand.finish_reason = finish_reason;
+  if (data.usageMetadata && this.streamIncludeUsage) {
+    obj.usage = transformUsage(data.usageMetadata);
+  }
+  cand.delta = {};
+  this.last[cand.index] = obj;
 }
-
 function toOpenAiStreamFlush(info, controller) {
-  const transform = transformResponseStream.bind(info);
   if (info.last.length > 0) {
-    for (const data of info.last) {
-      controller.enqueue(transform(data, "stop"));
+    for (const obj of info.last) {
+      controller.enqueue(sseline(obj));
     }
     controller.enqueue("data: [DONE]" + delimiter);
   }
