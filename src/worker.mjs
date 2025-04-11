@@ -100,15 +100,17 @@ async function handleEmbeddings (req, apiKey) {
   if (typeof req.model !== "string") {
     throw new HttpError("model is not specified", 400);
   }
-  if (!Array.isArray(req.input)) {
-    req.input = [ req.input ];
-  }
   let model;
   if (req.model.startsWith("models/")) {
     model = req.model;
   } else {
-    req.model = DEFAULT_EMBEDDINGS_MODEL;
+    if (!req.model.startsWith("gemini-")) {
+      req.model = DEFAULT_EMBEDDINGS_MODEL;
+    }
     model = "models/" + req.model;
+  }
+  if (!Array.isArray(req.input)) {
+    req.input = [ req.input ];
   }
   const response = await fetch(`${BASE_URL}/${API_VERSION}/${model}:batchEmbedContents`, {
     method: "POST",
@@ -140,7 +142,7 @@ async function handleEmbeddings (req, apiKey) {
 const DEFAULT_MODEL = "gemini-2.0-flash";
 async function handleCompletions (req, apiKey) {
   let model = DEFAULT_MODEL;
-  switch(true) {
+  switch (true) {
     case typeof req.model !== "string":
       break;
     case req.model.startsWith("models/"):
@@ -151,16 +153,25 @@ async function handleCompletions (req, apiKey) {
     case req.model.startsWith("learnlm-"):
       model = req.model;
   }
+  let body = await transformRequest(req);
+  switch (true) {
+    case model.endsWith(":search"):
+      model = model.substring(0, model.length - 7);
+      // eslint-disable-next-line no-fallthrough
+    case req.model.endsWith("-search-preview"):
+      body.tools = body.tools || [];
+      body.tools.push({googleSearch: {}});
+  }
   const TASK = req.stream ? "streamGenerateContent" : "generateContent";
   let url = `${BASE_URL}/${API_VERSION}/models/${model}:${TASK}`;
   if (req.stream) { url += "?alt=sse"; }
   const response = await fetch(url, {
     method: "POST",
     headers: makeHeaders(apiKey, { "Content-Type": "application/json" }),
-    body: JSON.stringify(await transformRequest(req)), // try
+    body: JSON.stringify(body),
   });
 
-  let body = response.body;
+  body = response.body;
   if (response.ok) {
     let id = generateChatcmplId(); //"chatcmpl-8pMMaqXMK68B3nyDBrapTDrhkHBQK";
     if (req.stream) {
@@ -180,7 +191,16 @@ async function handleCompletions (req, apiKey) {
         .pipeThrough(new TextEncoderStream());
     } else {
       body = await response.text();
-      body = processCompletionsResponse(JSON.parse(body), model, id);
+      try {
+        body = JSON.parse(body);
+        if (!body.candidates) {
+          throw new Error("Invalid completion object");
+        }
+      } catch (err) {
+        console.error("Error parsing response:", err);
+        return new Response(body, fixCors(response)); // output as is
+      }
+      body = processCompletionsResponse(body, model, id);
     }
   }
   return new Response(body, fixCors(response));
@@ -237,7 +257,7 @@ const transformConfig = (req) => {
     }
   }
   if (req.response_format) {
-    switch(req.response_format.type) {
+    switch (req.response_format.type) {
       case "json_schema":
         adjustSchema(req.response_format);
         cfg.responseSchema = req.response_format.json_schema?.schema;
@@ -275,7 +295,7 @@ const parseImg = async (url) => {
   } else {
     const match = url.match(/^data:(?<mimeType>.*?)(;base64)?,(?<data>.*)$/);
     if (!match) {
-      throw new Error("Invalid image data: " + url);
+      throw new HttpError("Invalid image data: " + url, 400);
     }
     ({ mimeType, data } = match.groups);
   }
@@ -287,13 +307,57 @@ const parseImg = async (url) => {
   };
 };
 
-const transformMsg = async ({ role, content }) => {
+const transformMsg = async ({ content, tool_calls, tool_call_id }, fnames) => {
   const parts = [];
+  if (tool_call_id !== undefined) {
+    let response;
+    try {
+      response = JSON.parse(content);
+    } catch (err) {
+      console.error("Error parsing function response content:", err);
+      throw new HttpError("Invalid function response: " + content, 400);
+    }
+    if (typeof response !== "object" || response === null || Array.isArray(response)) {
+      response = { result: response };
+    }
+    parts.push({
+      functionResponse: {
+        id: tool_call_id.startsWith("{") ? null : tool_call_id,
+        name: fnames[tool_call_id],
+        response,
+      }
+    });
+    return parts;
+  }
+  if (tool_calls) {
+    for (const tcall of tool_calls) {
+      if (tcall.type !== "function") {
+        throw new HttpError(`Unsupported tool_call type: "${tcall.type}"`, 400);
+      }
+      const { function: { arguments: argstr, name }, id } = tcall;
+      let args;
+      try {
+        args = JSON.parse(argstr);
+      } catch (err) {
+        console.error("Error parsing function arguments:", err);
+        throw new HttpError("Invalid function arguments: " + argstr, 400);
+      }
+      parts.push({
+        functionCall: {
+          id: id.startsWith("{") ? null : id,
+          name,
+          args,
+        }
+      });
+      fnames[id] = name;
+    }
+    return parts;
+  }
   if (!Array.isArray(content)) {
     // system, user: string
     // assistant: string or null (Required unless tool_calls is specified.)
     parts.push({ text: content });
-    return { role, parts };
+    return parts;
   }
   // user:
   // An array of content parts with a defined type.
@@ -316,26 +380,40 @@ const transformMsg = async ({ role, content }) => {
         });
         break;
       default:
-        throw new TypeError(`Unknown "content" item type: "${item.type}"`);
+        throw new HttpError(`Unknown "content" item type: "${item.type}"`, 400);
     }
   }
   if (content.every(item => item.type === "image_url")) {
     parts.push({ text: "" }); // to avoid "Unable to submit request because it must have a text parameter"
   }
-  return { role, parts };
+  return parts;
 };
 
 const transformMessages = async (messages) => {
   if (!messages) { return; }
   const contents = [];
   let system_instruction;
+  const fnames = {}; // cache function names by tool_call_id between messages
   for (const item of messages) {
     if (item.role === "system") {
-      delete item.role;
-      system_instruction = await transformMsg(item);
+      system_instruction = { parts: await transformMsg(item) };
     } else {
-      item.role = item.role === "assistant" ? "model" : "user";
-      contents.push(await transformMsg(item));
+      if (item.role === "assistant") {
+        item.role = "model";
+      } else if (item.role === "tool") {
+        const prev = contents[contents.length - 1];
+        if (prev?.role === "function") {
+          prev.parts.push(...await transformMsg(item, fnames));
+          continue;
+        }
+        item.role = "function"; // ignored
+      } else if (item.role !== "user") {
+        throw HttpError(`Unknown message role: "${item.role}"`, 400);
+      }
+      contents.push({
+        role: item.role,
+        parts: await transformMsg(item, fnames)
+      });
     }
   }
   if (system_instruction && contents.length === 0) {
@@ -345,10 +423,32 @@ const transformMessages = async (messages) => {
   return { system_instruction, contents };
 };
 
+const transformTools = (req) => {
+  let tools, tool_config;
+  if (req.tools) {
+    const funcs = req.tools.filter(tool => tool.type === "function");
+    funcs.forEach(adjustSchema);
+    tools = [{ function_declarations: funcs.map(schema => schema.function) }];
+  }
+  if (req.tool_choice) {
+    const allowed_function_names = req.tool_choice?.type === "function" ? [ req.tool_choice?.function?.name ] : undefined;
+    if (allowed_function_names || typeof req.tool_choice === "string") {
+      tool_config = {
+        function_calling_config: {
+          mode: allowed_function_names ? "ANY" : req.tool_choice.toUpperCase(),
+          allowed_function_names
+        }
+      };
+    }
+  }
+  return { tools, tool_config };
+};
+
 const transformRequest = async (req) => ({
   ...await transformMessages(req.messages),
   safetySettings,
   generationConfig: transformConfig(req),
+  ...transformTools(req),
 });
 
 const generateChatcmplId = () => {
@@ -364,17 +464,35 @@ const reasonsMap = { //https://ai.google.dev/api/rest/v1/GenerateContentResponse
   "SAFETY": "content_filter",
   "RECITATION": "content_filter",
   //"OTHER": "OTHER",
-  // :"function_call",
 };
 const SEP = "\n\n|>";
-const transformCandidates = (key, cand) => ({
-  index: cand.index || 0, // 0-index is absent in new -002 models response
-  [key]: {
-    role: "assistant",
-    content: cand.content?.parts.map(p => p.text).join(SEP) },
-  logprobs: null,
-  finish_reason: reasonsMap[cand.finishReason] || cand.finishReason,
-});
+const transformCandidates = (key, cand) => {
+  const message = { role: "assistant", content: [] };
+  for (const part of cand.content?.parts ?? []) {
+    if (part.functionCall) {
+      const fc = part.functionCall;
+      message.tool_calls = message.tool_calls ?? [];
+      message.tool_calls.push({
+        id: fc.id ?? `{${fc.name}}`,
+        type: "function",
+        function: {
+          name: fc.name,
+          arguments: JSON.stringify(fc.args),
+        }
+      });
+    } else {
+      message.content.push(part.text);
+    }
+  }
+  message.content = message.content.join(SEP) || null;
+  return {
+    index: cand.index || 0, // 0-index is absent in new -002 models response
+    [key]: message,
+    logprobs: null,
+    finish_reason: message.tool_calls ? "tool_calls" : reasonsMap[cand.finishReason] || cand.finishReason,
+    //original_finish_reason: cand.finishReason,
+  };
+};
 const transformCandidatesMessage = transformCandidates.bind(null, "message");
 const transformCandidatesDelta = transformCandidates.bind(null, "delta");
 
@@ -384,22 +502,43 @@ const transformUsage = (data) => ({
   total_tokens: data.totalTokenCount
 });
 
+const checkPromptBlock = (choices, promptFeedback, key) => {
+  if (choices.length) { return; }
+  if (promptFeedback?.blockReason) {
+    console.log("Prompt block reason:", promptFeedback.blockReason);
+    if (promptFeedback.blockReason === "SAFETY") {
+      promptFeedback.safetyRatings
+        .filter(r => r.blocked)
+        .forEach(r => console.log(r));
+    }
+    choices.push({
+      index: 0,
+      [key]: null,
+      finish_reason: "content_filter",
+      //original_finish_reason: data.promptFeedback.blockReason,
+    });
+  }
+  return true;
+};
+
 const processCompletionsResponse = (data, model, id) => {
-  return JSON.stringify({
+  const obj = {
     id,
     choices: data.candidates.map(transformCandidatesMessage),
     created: Math.floor(Date.now()/1000),
-    model,
+    model: data.modelVersion ?? model,
     //system_fingerprint: "fp_69829325d0",
     object: "chat.completion",
-    usage: transformUsage(data.usageMetadata),
-  });
+    usage: data.usageMetadata && transformUsage(data.usageMetadata),
+  };
+  if (obj.choices.length === 0 ) {
+    checkPromptBlock(obj.choices, data.promptFeedback, "message");
+  }
+  return JSON.stringify(obj);
 };
 
 const responseLineRE = /^data: (.*)(?:\n\n|\r\r|\r\n\r\n)/;
-async function parseStream (chunk, controller) {
-  chunk = await chunk;
-  if (!chunk) { return; }
+function parseStream (chunk, controller) {
   this.buffer += chunk;
   do {
     const match = this.buffer.match(responseLineRE);
@@ -408,65 +547,69 @@ async function parseStream (chunk, controller) {
     this.buffer = this.buffer.substring(match[0].length);
   } while (true); // eslint-disable-line no-constant-condition
 }
-async function parseStreamFlush (controller) {
+function parseStreamFlush (controller) {
   if (this.buffer) {
     console.error("Invalid data:", this.buffer);
     controller.enqueue(this.buffer);
   }
 }
 
-function transformResponseStream (data, stop, first) {
-  const item = transformCandidatesDelta(data.candidates[0]);
-  if (stop) { item.delta = {}; } else { item.finish_reason = null; }
-  if (first) { item.delta.content = ""; } else { delete item.delta.role; }
-  const output = {
-    id: this.id,
-    choices: [item],
-    created: Math.floor(Date.now()/1000),
-    model: this.model,
-    //system_fingerprint: "fp_69829325d0",
-    object: "chat.completion.chunk",
-  };
-  if (data.usageMetadata && this.streamIncludeUsage) {
-    output.usage = stop ? transformUsage(data.usageMetadata) : null;
-  }
-  return "data: " + JSON.stringify(output) + delimiter;
-}
 const delimiter = "\n\n";
-async function toOpenAiStream (chunk, controller) {
-  const transform = transformResponseStream.bind(this);
-  const line = await chunk;
-  if (!line) { return; }
+const sseline = (obj) => {
+  obj.created = Math.floor(Date.now()/1000);
+  return "data: " + JSON.stringify(obj) + delimiter;
+};
+function toOpenAiStream (line, controller) {
   let data;
   try {
     data = JSON.parse(line);
+    if (!data.candidates) {
+      throw new Error("Invalid completion chunk object");
+    }
   } catch (err) {
-    console.error(line);
-    console.error(err);
-    const length = this.last.length || 1; // at least 1 error msg
-    const candidates = Array.from({ length }, (_, index) => ({
-      finishReason: "error",
-      content: { parts: [{ text: err }] },
-      index,
-    }));
-    data = { candidates };
+    console.error("Error parsing response:", err);
+    controller.enqueue(line); // output as is
+    return;
   }
-  const cand = data.candidates[0];
+  const obj = {
+    id: this.id,
+    choices: data.candidates.map(transformCandidatesDelta),
+    //created: Math.floor(Date.now()/1000),
+    model: data.modelVersion ?? this.model,
+    //system_fingerprint: "fp_69829325d0",
+    object: "chat.completion.chunk",
+    usage: data.usageMetadata && this.streamIncludeUsage ? null : undefined,
+  };
+  if (checkPromptBlock(obj.choices, data.promptFeedback, "delta")) {
+    controller.enqueue(sseline(obj));
+    return;
+  }
   console.assert(data.candidates.length === 1, "Unexpected candidates count: %d", data.candidates.length);
+  const cand = obj.choices[0];
   cand.index = cand.index || 0; // absent in new -002 models response
-  if (!this.last[cand.index]) {
-    controller.enqueue(transform(data, false, "first"));
+  const finish_reason = cand.finish_reason;
+  cand.finish_reason = null;
+  if (!this.last[cand.index]) { // first
+    controller.enqueue(sseline({
+      ...obj,
+      choices: [{ ...cand, tool_calls: undefined, delta: { role: "assistant", content: "" } }],
+    }));
   }
-  this.last[cand.index] = data;
-  if (cand.content) { // prevent empty data (e.g. when MAX_TOKENS)
-    controller.enqueue(transform(data));
+  delete cand.delta.role;
+  if ("content" in cand.delta) { // prevent empty data (e.g. when MAX_TOKENS)
+    controller.enqueue(sseline(obj));
   }
+  cand.finish_reason = finish_reason;
+  if (data.usageMetadata && this.streamIncludeUsage) {
+    obj.usage = transformUsage(data.usageMetadata);
+  }
+  cand.delta = {};
+  this.last[cand.index] = obj;
 }
-async function toOpenAiStreamFlush (controller) {
-  const transform = transformResponseStream.bind(this);
+function toOpenAiStreamFlush (controller) {
   if (this.last.length > 0) {
-    for (const data of this.last) {
-      controller.enqueue(transform(data, "stop"));
+    for (const obj of this.last) {
+      controller.enqueue(sseline(obj));
     }
     controller.enqueue("data: [DONE]" + delimiter);
   }
