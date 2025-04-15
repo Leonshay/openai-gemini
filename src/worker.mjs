@@ -1,4 +1,4 @@
-import {Buffer} from "node:buffer";
+import { Buffer } from "node:buffer";
 
 export default {
   async fetch (request) {
@@ -96,8 +96,7 @@ async function handleModels (apiKey) {
 }
 
 const DEFAULT_EMBEDDINGS_MODEL = "text-embedding-004";
-
-async function handleEmbeddings(req, apiKey) {
+async function handleEmbeddings (req, apiKey) {
   if (typeof req.model !== "string") {
     throw new HttpError("model is not specified", 400);
   }
@@ -147,7 +146,7 @@ const thinkingChunks = [];
 async function handleCompletions(req, apiKey) {
   thinkingChunks.length = 0;
   let model = DEFAULT_MODEL;
-  switch (true) {
+  switch(true) {
     case typeof req.model !== "string":
       break;
     case req.model.startsWith("models/"):
@@ -561,7 +560,8 @@ ${lastUserContent}
 
   if (thinkingResponse.ok) {
     // 生成唯一ID
-    let id = generateChatcmplId();
+    let id = "chatcmpl-" + generateId(); //"chatcmpl-8pMMaqXMK68B3nyDBrapTDrhkHBQK";
+    const shared = {};
 
     if (req.stream) {
       // 创建一个TransformStream来处理思考流
@@ -571,6 +571,7 @@ ${lastUserContent}
           transform: parseStream,
           flush: parseStreamFlush,
           buffer: "",
+          shared,
         }));
 
       // 收集思考内容
@@ -582,6 +583,7 @@ ${lastUserContent}
         streamIncludeUsage: req.stream,
         model,
         id,
+        shared,
         async start(controller) {
           try {
             // 读取并处理思考流
@@ -835,7 +837,7 @@ const parseImg = async (url) => {
     if (!match) {
       throw new HttpError("Invalid image data: " + url, 400);
     }
-    ({mimeType, data} = match.groups);
+    ({ mimeType, data } = match.groups);
   }
   return {
     inlineData: {
@@ -845,52 +847,67 @@ const parseImg = async (url) => {
   };
 };
 
-const transformMsg = async ({content, tool_calls, tool_call_id}, fnames) => {
-  const parts = [];
-  if (tool_call_id !== undefined) {
-    let response;
+const transformFnResponse = ({ content, tool_call_id }, parts) => {
+  if (!parts.calls) {
+    throw new HttpError("No function calls found in the previous message", 400);
+  }
+  let response;
+  try {
+    response = JSON.parse(content);
+  } catch (err) {
+    console.error("Error parsing function response content:", err);
+    throw new HttpError("Invalid function response: " + content, 400);
+  }
+  if (typeof response !== "object" || response === null || Array.isArray(response)) {
+    response = { result: response };
+  }
+  if (!tool_call_id) {
+    throw new HttpError("tool_call_id not specified", 400);
+  }
+  const { i, name } = parts.calls[tool_call_id] ?? {};
+  if (!name) {
+    throw new HttpError("Unknown tool_call_id: " + tool_call_id, 400);
+  }
+  if (parts[i]) {
+    throw new HttpError("Duplicated tool_call_id: " + tool_call_id, 400);
+  }
+  parts[i] = {
+    functionResponse: {
+      id: tool_call_id.startsWith("call_") ? null : tool_call_id,
+      name,
+      response,
+    }
+  };
+};
+
+const transformFnCalls = ({ tool_calls }) => {
+  const calls = {};
+  const parts = tool_calls.map(({ function: { arguments: argstr, name }, id, type }, i) => {
+    if (type !== "function") {
+      throw new HttpError(`Unsupported tool_call type: "${type}"`, 400);
+    }
+    let args;
     try {
-      response = JSON.parse(content);
+      args = JSON.parse(argstr);
     } catch (err) {
-      console.error("Error parsing function response content:", err);
-      throw new HttpError("Invalid function response: " + content, 400);
+      console.error("Error parsing function arguments:", err);
+      throw new HttpError("Invalid function arguments: " + argstr, 400);
     }
-    if (typeof response !== "object" || response === null || Array.isArray(response)) {
-      response = {result: response};
-    }
-    parts.push({
-      functionResponse: {
-        id: tool_call_id.startsWith("{") ? null : tool_call_id,
-        name: fnames[tool_call_id],
-        response,
+    calls[id] = {i, name};
+    return {
+      functionCall: {
+        id: id.startsWith("call_") ? null : id,
+        name,
+        args,
       }
-    });
-    return parts;
-  }
-  if (tool_calls) {
-    for (const tcall of tool_calls) {
-      if (tcall.type !== "function") {
-        throw new HttpError(`Unsupported tool_call type: "${tcall.type}"`, 400);
-      }
-      const {function: {arguments: argstr, name}, id} = tcall;
-      let args;
-      try {
-        args = JSON.parse(argstr);
-      } catch (err) {
-        console.error("Error parsing function arguments:", err);
-        throw new HttpError("Invalid function arguments: " + argstr, 400);
-      }
-      parts.push({
-        functionCall: {
-          id: id.startsWith("{") ? null : id,
-          name,
-          args,
-        }
-      });
-      fnames[id] = name;
-    }
-    return parts;
-  }
+    };
+  });
+  parts.calls = calls;
+  return parts;
+};
+
+const transformMsg = async ({ content }) => {
+  const parts = [];
   if (!Array.isArray(content)) {
     // system, user: string
     // assistant: string or null (Required unless tool_calls is specified.)
@@ -904,7 +921,7 @@ const transformMsg = async ({content, tool_calls, tool_call_id}, fnames) => {
   for (const item of content) {
     switch (item.type) {
       case "text":
-        parts.push({text: item.text});
+        parts.push({ text: item.text });
         break;
       case "image_url":
         parts.push(await parseImg(item.image_url.url));
@@ -922,46 +939,53 @@ const transformMsg = async ({content, tool_calls, tool_call_id}, fnames) => {
     }
   }
   if (content.every(item => item.type === "image_url")) {
-    parts.push({text: ""}); // to avoid "Unable to submit request because it must have a text parameter"
+    parts.push({ text: "" }); // to avoid "Unable to submit request because it must have a text parameter"
   }
   return parts;
 };
 
 const transformMessages = async (messages) => {
-  if (!messages) {
-    return;
-  }
+  if (!messages) { return; }
   const contents = [];
-  // let count = 0;
   let system_instruction;
-  const fnames = {}; // cache function names by tool_call_id between messages
   for (const item of messages) {
-    if (item.role === "system") {
-      system_instruction = {parts: await transformMsg(item)};
-    } else {
-      if (item.role === "assistant") {
-        item.role = "model";
-      } else if (item.role === "tool") {
-        const prev = contents[contents.length - 1];
-        if (prev?.role === "function") {
-          prev.parts.push(...await transformMsg(item, fnames));
-          continue;
+    switch (item.role) {
+      case "system":
+        system_instruction = { parts: await transformMsg(item) };
+        continue;
+      case "tool":
+        // eslint-disable-next-line no-case-declarations
+        let { role, parts } = contents[contents.length - 1] ?? {};
+        if (role !== "function") {
+          const calls = parts?.calls;
+          parts = []; parts.calls = calls;
+          contents.push({
+            role: "function", // ignored
+            parts
+          });
         }
-        item.role = "function"; // ignored
-      } else if (item.role !== "user") {
+        transformFnResponse(item, parts);
+        continue;
+      case "assistant":
+        item.role = "model";
+        break;
+      case "user":
+        break;
+      default:
         throw new HttpError(`Unknown message role: "${item.role}"`, 400);
-      }
-      contents.push({
-        role: item.role,
-        parts: await transformMsg(item, fnames)
-      });
+    }
+    contents.push({
+      role: item.role,
+      parts: item.tool_calls ? transformFnCalls(item) : await transformMsg(item)
+    });
+  }
+  if (system_instruction) {
+    if (!contents[0]?.parts.some(part => part.text)) {
+      contents.unshift({ role: "user", parts: { text: " " } });
     }
   }
-  if (system_instruction && contents.length === 0) {
-    contents.push({role: "model", parts: {text: " "}});
-  }
   //console.info(JSON.stringify(contents, 2));
-  return {system_instruction, contents};
+  return { system_instruction, contents };
 };
 
 const transformTools = (req) => {
@@ -969,10 +993,10 @@ const transformTools = (req) => {
   if (req.tools) {
     const funcs = req.tools.filter(tool => tool.type === "function");
     funcs.forEach(adjustSchema);
-    tools = [{function_declarations: funcs.map(schema => schema.function)}];
+    tools = [{ function_declarations: funcs.map(schema => schema.function) }];
   }
   if (req.tool_choice) {
-    const allowed_function_names = req.tool_choice?.type === "function" ? [req.tool_choice?.function?.name] : undefined;
+    const allowed_function_names = req.tool_choice?.type === "function" ? [ req.tool_choice?.function?.name ] : undefined;
     if (allowed_function_names || typeof req.tool_choice === "string") {
       tool_config = {
         function_calling_config: {
@@ -982,7 +1006,7 @@ const transformTools = (req) => {
       };
     }
   }
-  return {tools, tool_config};
+  return { tools, tool_config };
 };
 
 const transformRequest = async (req) => ({
@@ -992,10 +1016,10 @@ const transformRequest = async (req) => ({
   ...transformTools(req),
 });
 
-const generateChatcmplId = () => {
+const generateId = () => {
   const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   const randomChar = () => characters[Math.floor(Math.random() * characters.length)];
-  return "chatcmpl-" + Array.from({length: 29}, randomChar).join("");
+  return Array.from({ length: 29 }, randomChar).join("");
 };
 
 const reasonsMap = { //https://ai.google.dev/api/rest/v1/GenerateContentResponse#finishreason
@@ -1005,23 +1029,23 @@ const reasonsMap = { //https://ai.google.dev/api/rest/v1/GenerateContentResponse
   "SAFETY": "content_filter",
   "RECITATION": "content_filter",
   //"OTHER": "OTHER",
+  // :"function_call",
 };
 const SEP = "\n\n|>";
 const transformCandidates = (key, cand) => {
-  const message = {role: "assistant", content: []};
+  const message = { role: "assistant", content: [] };
   for (const part of cand.content?.parts ?? []) {
     if (part.functionCall) {
       const fc = part.functionCall;
       message.tool_calls = message.tool_calls ?? [];
       message.tool_calls.push({
-        id: fc.id ?? `{${fc.name}}`,
+        id: fc.id ?? "call_" + generateId(),
         type: "function",
         function: {
           name: fc.name,
           arguments: JSON.stringify(fc.args),
         }
       });
-      console.log("Function call pt:", fc)
     } else {
       message.content.push(part.text);
     }
@@ -1035,22 +1059,20 @@ const transformCandidates = (key, cand) => {
     //original_finish_reason: cand.finishReason,
   };
 };
-
 const transformThinkingCandidates = (key, cand) => {
-  const message = {role: "assistant", reasoning_content: []};
+  const message = { role: "assistant", content: [] };
   for (const part of cand.content?.parts ?? []) {
     if (part.functionCall) {
       const fc = part.functionCall;
       message.tool_calls = message.tool_calls ?? [];
       message.tool_calls.push({
-        id: fc.id ?? `{${fc.name}}`,
+        id: fc.id ?? "call_" + generateId(),
         type: "function",
         function: {
           name: fc.name,
           arguments: JSON.stringify(fc.args),
         }
       });
-      console.log("Function call:", fc)
     } else {
       message.reasoning_content.push(part.text);
     }
@@ -1064,6 +1086,7 @@ const transformThinkingCandidates = (key, cand) => {
     //original_finish_reason: cand.finishReason,
   };
 };
+
 const transformCandidatesMessage = transformCandidates.bind(null, "message");
 const transformCandidatesDelta = transformCandidates.bind(null, "delta");
 const transformThinkingCandidatesDelta = transformThinkingCandidates.bind(null, "delta");
@@ -1114,18 +1137,16 @@ function parseStream (chunk, controller) {
   this.buffer += chunk;
   do {
     const match = this.buffer.match(responseLineRE);
-    if (!match) {
-      break;
-    }
+    if (!match) { break; }
     controller.enqueue(match[1]);
     this.buffer = this.buffer.substring(match[0].length);
   } while (true); // eslint-disable-line no-constant-condition
 }
-
-function parseStreamFlush(controller) {
+function parseStreamFlush (controller) {
   if (this.buffer) {
     console.error("Invalid data:", this.buffer);
     controller.enqueue(this.buffer);
+    this.shared.is_buffers_rest = true;
   }
 }
 
@@ -1143,6 +1164,7 @@ function toOpenAiStream (info, line, controller, isThinking) {
     }
   } catch (err) {
     console.error("Error parsing response:", err);
+    if (!info.shared.is_buffers_rest) { line =+ delimiter; }
     controller.enqueue(line); // output as is
     return;
   }
@@ -1191,7 +1213,7 @@ function toOpenAiStream (info, line, controller, isThinking) {
   cand.delta = {};
   info.last[cand.index] = obj;
 }
-function toOpenAiStreamFlush(info, controller) {
+function toOpenAiStreamFlush (info, controller) {
   if (info.last.length > 0) {
     for (const obj of info.last) {
       controller.enqueue(sseline(obj));
