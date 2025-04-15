@@ -1060,7 +1060,7 @@ const transformCandidates = (key, cand) => {
   };
 };
 const transformThinkingCandidates = (key, cand) => {
-  const message = { role: "assistant", content: [] };
+  const message = { role: "assistant", reasoning_content: [] };
   for (const part of cand.content?.parts ?? []) {
     if (part.functionCall) {
       const fc = part.functionCall;
