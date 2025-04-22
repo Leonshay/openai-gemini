@@ -617,8 +617,8 @@ ${lastUserContent}
 # Thinking process:
 ${thinkingContent}
 ---
-现在请参考Thinking process，回顾original system prompt的要求，有冲突时优先遵守User Content，结合这三者以来组织撰写最终回复，而不是回复思考过程或复述思考过程。
-重要提示：如果思考过程正表示在调用工具中，请输出“工具或函数调用中……”，不要发送其他信息，继续等待工具返回结果
+重要提示：如果思考过程正表示在调用工具中，请输出“工具或函数调用中……”，不要发送其他信息，继续等待工具返回结果。
+现在请参考Thinking process，回顾original system prompt的要求，有冲突时优先遵守User Content，结合这三者来整理并组织撰写最终回复（不要丢失信息），而不是回复思考过程或复述思考过程。
 `
             };
           }
